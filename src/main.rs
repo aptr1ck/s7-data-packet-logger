@@ -1,56 +1,29 @@
-//use std::net::{TcpListener, TcpStream};
+mod sql;
+mod event_data;
+mod utils;
+
 use std::io::{Read, Write};
-use chrono::Local;
 use tokio::time::{timeout, Duration};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-const DEBUG: bool = true; // Set to true to enable debug logging
-
-// Event Data Packet Definition
-struct EventDataPacket {
-    pub raw: Vec<u8>, // Raw bytes of the packet
-    pub event_code: u32, // 4 bytes for event type = 1 PLC DINT
-    pub plc_packet_code: u32, // 4 bytes for PLC packet type = 1 PLC DINT
-    pub data: Vec<u32>,  // Variable length data
-}
-
-fn parse_event_data_packet(bytes: &[u8]) -> Option<EventDataPacket> {
-    if bytes.len() < 8 || bytes.len() % 4 != 0 {
-        return None; // Not enough data or misaligned
-    }
-
-    let raw = bytes.to_vec(); // Store the raw bytes
-    let event_code = u32::from_be_bytes(bytes[0..4].try_into().ok()?);
-    let plc_packet_code = u32::from_be_bytes(bytes[4..8].try_into().ok()?);
-
-    let mut data = Vec::new();
-    for chunk in bytes[8..].chunks(4) {
-        let value = u32::from_be_bytes(chunk.try_into().ok()?);
-        data.push(value);
-    }
-
-    Some(EventDataPacket {
-        raw,
-        event_code,
-        plc_packet_code,
-        data,
-    })
-}
-
-fn log(message: &str) {
-    let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S");
-    println!("[{}] {}", timestamp, message);
-}
+use rusqlite::{params, Connection, Result};
+use serde_json;
+use crate::sql::*;
+use crate::event_data::*;
+use crate::utils::*;
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
-    let listener = TcpListener::bind("0.0.0.0:10200").await?;
-    log("Server listening on port 10200");
+    let address = "0.0.0.0:10200"; // TODO: Make this configurable
+    let listener = TcpListener::bind(address).await?;
+    if DEBUG { log(&format!("Server listening on {}", address)); }
 
     loop {
         let (mut socket, addr) = listener.accept().await?;
         log(&format!("New connection from {}", addr));
+
+        // Initialize SQLite connection
+        let conn = connect_to_db().expect("Failed to connect to database");
 
         tokio::spawn(async move {
             let mut buffer = [0u8; 512];
@@ -68,6 +41,11 @@ async fn main() -> std::io::Result<()> {
                         if let Some(packet) = parse_event_data_packet(&buffer[..size]) {
                             log(&format!("Parsed packet: event_code={}, plc_packet_code={}, data={:?}",
                                          packet.event_code, packet.plc_packet_code, packet.data));
+                            // Check for system packet that we should not store.
+                            if !system_packet(&packet) {
+                                // Put the data into the database
+                                let _ = store_packet(&conn, &packet); // TODO: Handle the response properly.
+                            }
                         } else {
                             log("Failed to parse event data packet.");
                         }
@@ -87,7 +65,7 @@ async fn main() -> std::io::Result<()> {
                 }
             }
 
-            log("Ending connection handler.");
+            if DEBUG { log("Ending connection handler."); }
         });
     }
 }
