@@ -1,10 +1,11 @@
 mod sql;
 mod event_data;
+mod filehandling;
 mod registryhandling;
 mod utils;
 mod ui;
 
-use std::sync::Arc;
+use std::sync::{Arc, mpsc};
 use tokio::sync::Notify;
 use std::thread;
 //use std::io::{Read, Write};
@@ -15,16 +16,22 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 //use serde_json;
 use crate::sql::*;
 use crate::event_data::*;
-use crate::registryhandling::*;
+//use crate::registryhandling::*;
 use crate::utils::*;
 use crate::ui::*;
 
-async fn run_server(shutdown_notify: Arc<Notify>) -> std::io::Result<()> {
-    let address = "0.0.0.0:10200"; // TODO: Make this configurable
+async fn run_server(
+    shutdown_notify: Arc<Notify>, 
+    ip_address: String, 
+    port: String,
+    tx: std::sync::mpsc::Sender<()>,
+) -> std::io::Result<()> {
+    let address = format!("{}:{}", ip_address, port); // TODO: Make this configurable
     let listener = TcpListener::bind(address).await?;
-    if DEBUG { log(&format!("Server listening on {}", address)); }
+    if DEBUG { log(&format!("Server listening on {}:{}", ip_address, port)); }
   
     loop {
+        let tx = tx.clone(); // Clone the sender for each connection
         tokio::select! {
             accept_result = listener.accept() => {
                 match accept_result {
@@ -46,7 +53,8 @@ async fn run_server(shutdown_notify: Arc<Notify>) -> std::io::Result<()> {
                                             }
                                             Ok(size) => {
                                                 log(&format!("Received {} bytes: {:?}", size, &buffer[..size]));
-
+                                                // Notify the UI thread about new data
+                                                let _ = tx.send(());
                                                 // Deserialize the event data packet
                                                 if let Some(packet) = parse_event_data_packet(&buffer[..size]) {
                                                     log(&format!("Parsed packet: event_code={}, plc_packet_code={}, data={:?}",
@@ -103,16 +111,15 @@ async fn main() {//-> std::io::Result<()> {
     let shutdown_notify = Arc::new(Notify::new());
     let shutdown_notify_ui = shutdown_notify.clone();
 
+    // Channel for server-to-UI notifications
+    let (tx, rx) = mpsc::channel();
+
     // Spawn the WinAPI window in a separate thread
     thread::spawn(|| {
-        main_window(Some(shutdown_notify_ui)); // Your function here
+        main_window(Some(shutdown_notify_ui), rx); // Your function here
     });
 
-    // Continue with the async TCP server
-    /*tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()?
-        .block_on(run_server())
-        */
-    let _ = run_server(shutdown_notify).await;
+    let ip_address = "0.0.0.0".to_string();
+    let port = 10200.to_string();
+    let _ = run_server(shutdown_notify, ip_address, port, tx).await;
 }

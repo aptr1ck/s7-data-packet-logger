@@ -4,6 +4,7 @@ use std::io::Write;
 
 pub const DEBUG: bool = true; // Set to true to enable debug logging
 pub const APPNAME: &str = "MyApp"; 
+pub const APPVERSION: &str = "0.0.1";
 
 pub fn log(message: &str) {
     let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S");
