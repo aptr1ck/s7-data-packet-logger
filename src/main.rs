@@ -5,6 +5,7 @@ mod filehandling;
 mod registryhandling;
 mod utils;
 mod ui;
+mod xmlhandling;
 
 use std::sync::{Arc, mpsc};
 use tokio::sync::Notify;
@@ -20,6 +21,7 @@ use crate::event_data::*;
 //use crate::registryhandling::*;
 use crate::utils::*;
 use crate::ui::*;
+use crate::xmlhandling::*;
 
 async fn run_server(
     shutdown_notify: Arc<Notify>, 
@@ -120,7 +122,10 @@ async fn main() {//-> std::io::Result<()> {
         main_window(Some(shutdown_notify_ui), rx); // Your function here
     });
 
-    let ip_address = "0.0.0.0".to_string();
-    let port = 10200.to_string();
+    // Load configuration from XML file
+    let config = load_config("config.xml")
+        .expect("Failed to load configuration");
+    let ip_address = config.ip_address;
+    let port = config.port.to_string();
     let _ = run_server(shutdown_notify, ip_address, port, tx).await;
 }
