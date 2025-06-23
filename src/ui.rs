@@ -1,11 +1,15 @@
 use std::fs;
 use std::ptr::{null, null_mut};
 use std::sync::Arc;
+use std::time::{Instant, Duration};
 use tokio::sync::Notify;
 use winapi::um::winuser::*;
 //use winapi::um::winnt::{KEY_WRITE, KEY_READ, REG_DWORD, REG_SZ};
 use winapi::um::libloaderapi::{GetModuleHandleW, LoadLibraryW};
-use winapi::shared::windef::{HBRUSH, HWND}; 
+use winapi::um::shellapi::ShellExecuteW;
+use winapi::um::wingdi::{GetTextExtentPoint32W, CreateFontW, FW_NORMAL, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, FF_DONTCARE};
+use winapi::um::wingdi::{SelectObject, GetStockObject, SetTextColor, SetBkMode, TRANSPARENT, RGB};
+use winapi::shared::windef::{HBRUSH, HWND, SIZE, HGDIOBJ}; 
 use winapi::shared::minwindef::{LPARAM, LRESULT, UINT, WPARAM, LOWORD, HIWORD};
 use std::sync::Mutex;
 use once_cell::sync::Lazy;
@@ -14,14 +18,17 @@ use crate::registryhandling::*;
 use crate::utils::*;
 
 // CONSTANTS
-pub const ID_FILE_OPEN: u16 = 101;
-pub const ID_FILE_SAVE: u16 = 102;
-pub const ID_FILE_SAVE_AS: u16 = 103;
-pub const ID_FILE_EXIT: u16 = 100;
-pub const ID_FILE_NEW: u16 = 104;
-pub const WM_NEW_DATA: u32 = WM_USER + 1;
+const ID_FILE_OPEN: u16 = 101;
+const ID_FILE_SAVE: u16 = 102;
+const ID_FILE_SAVE_AS: u16 = 103;
+const ID_FILE_EXIT: u16 = 100;
+const ID_FILE_NEW: u16 = 104;
+const ID_HELP_ABOUT: u16 = 200;
+const ID_EMAIL_LABEL: i32 = 5001;
+const WM_NEW_DATA: u32 = WM_USER + 1;
 const LOG_LINES: usize = 500; // Number of lines to show in the log viewer
 
+// Global Mutables.
 //static MAIN_HWND: Lazy<Mutex<HWND>> = Lazy::new(|| Mutex::new(std::ptr::null_mut()));
 static mut CHILD_VIEW: HWND = null_mut();
 
@@ -57,6 +64,182 @@ impl SetupGuard {
 impl Drop for SetupGuard {
     fn drop(&mut self) {
         unsafe { IS_SETTING_UP = false; }
+    }
+}
+// =========
+
+// =========
+// About this Application Dialog
+unsafe extern "system" fn about_dlg_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    match msg {
+        WM_COMMAND => {
+            if LOWORD(wparam as u32) as usize == 1 {
+                DestroyWindow(hwnd);
+                return 0;
+            }
+        }
+        WM_CLOSE => {
+            DestroyWindow(hwnd);
+            return 0;
+        }
+        WM_DESTROY => {
+            // Post quit message to exit the dialog's message loop
+            PostQuitMessage(0);
+            return 0;
+        }
+        _ => {}
+    }
+    DefWindowProcW(hwnd, msg, wparam, lparam)
+}
+
+fn show_about_dialog(hwnd: HWND) {
+    unsafe {
+        let h_instance = GetModuleHandleW(null_mut());
+        let class_name = widestring("about_dialog_class");
+        let dialog_width = 350;
+        let hyperlink_font = unsafe {
+            CreateFontW(
+                16, 0, 0, 0, FW_NORMAL, 1, 1, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+                CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
+                widestring("").as_ptr(),
+            )
+        };
+
+        // Register a custom window class for the dialog
+        let wnd_class = WNDCLASSW {
+            style: CS_HREDRAW | CS_VREDRAW,
+            lpfnWndProc: Some(about_dlg_proc),
+            hInstance: h_instance,
+            lpszClassName: class_name.as_ptr(),
+            hCursor: LoadCursorW(null_mut(), IDC_ARROW),
+            hbrBackground: (COLOR_WINDOW) as HBRUSH,
+            ..std::mem::zeroed()
+        };
+        RegisterClassW(&wnd_class);
+
+        // Create a simple dialog window
+        let about_hwnd = CreateWindowExW(
+            WS_EX_DLGMODALFRAME,
+            class_name.as_ptr(),
+            widestring("").as_ptr(),
+            WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
+            CW_USEDEFAULT, CW_USEDEFAULT, dialog_width, 250,
+            hwnd, null_mut(), h_instance, null_mut(),
+        );
+
+        // App info
+        let info = format!(
+            "{} v{}\n\nThis application receives data packets from a PLC and stores them in a sqlite3 database.\n\nDeveloped by {}.",
+            APPNAME, APPVERSION, APPAUTHOR
+        );
+        CreateWindowExW(
+            0,
+            widestring("STATIC").as_ptr(),
+            widestring(&info).as_ptr(),
+            WS_CHILD | WS_VISIBLE | SS_CENTER,
+            10, 10, dialog_width-50, 80,
+            about_hwnd, null_mut(), h_instance, null_mut(),
+        );
+
+        // Email as a "hyperlink"
+        let email = widestring(APPEMAIL);
+        let hdc = GetDC(about_hwnd);
+        let mut size: SIZE = std::mem::zeroed();
+        GetTextExtentPoint32W(hdc, email.as_ptr(), email.len() as i32, &mut size);
+        ReleaseDC(about_hwnd, hdc);
+        let email_width = size.cx + 8; // add some padding
+        let email_x = ((dialog_width - email_width) / 2)-15;
+        let h_email = CreateWindowExW(
+            0,
+            widestring("STATIC").as_ptr(),
+            email.as_ptr(),
+            WS_CHILD | WS_VISIBLE | SS_CENTER,
+            email_x, 100, email_width, 20,
+            about_hwnd,
+            ID_EMAIL_LABEL as _,
+            h_instance,
+            null_mut(),
+        );
+        SendMessageW(h_email, WM_SETFONT, hyperlink_font as WPARAM, 1);
+        
+        // OK button
+        let h_ok = CreateWindowExW(
+            0,
+            widestring("BUTTON").as_ptr(),
+            widestring("OK").as_ptr(),
+            WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
+            120, 130, 80, 30,
+            about_hwnd, 1 as _, h_instance, null_mut(),
+        );
+
+        ShowWindow(about_hwnd, SW_SHOW);
+        UpdateWindow(about_hwnd);
+
+        // Message loop for the dialog
+        let mut msg: MSG = std::mem::zeroed();
+        loop {
+            if GetMessageW(&mut msg, /*about_hwnd*/null_mut(), 0, 0) <= 0 {
+                break;
+            }
+            
+            if msg.hwnd == about_hwnd {
+                if msg.message == WM_COMMAND {
+                    log(&format!("WM_COMMAND received: wParam={}, lParam={}", msg.wParam, msg.lParam));
+                    if LOWORD(msg.wParam as u32) as usize == 1 {
+                        DestroyWindow(about_hwnd);
+                        break;
+                    }
+                }
+
+                if msg.message == WM_SETCURSOR {
+                    let hwnd_cursor = msg.wParam as HWND;
+                    if hwnd_cursor == h_email { 
+                        SetCursor(LoadCursorW(null_mut(), IDC_HAND));
+                        //return 1;
+                    }
+                }
+
+                if msg.message == WM_CTLCOLORSTATIC {
+                    let hdc_static = msg.wParam as winapi::shared::windef::HDC;
+                    let hwnd_static = msg.lParam as HWND;
+                    // Check if this is the email label
+                    if GetDlgCtrlID(hwnd_static) == h_email as i32 {
+                        SetTextColor(hdc_static, RGB(0, 0, 255)); // Blue
+                        SetBkMode(hdc_static, TRANSPARENT as i32);
+                        SelectObject(hdc_static, hyperlink_font as HGDIOBJ);
+                    }
+                    //return GetStockObject(NULL_BRUSH as i32) as isize;
+                }
+
+                if /*msg.hwnd == about_hwnd &&*/ msg.message == WM_LBUTTONDOWN {
+                    // Check if click is on the email label
+                    let x = LOWORD(msg.lParam as u32) as i32;
+                    let y = HIWORD(msg.lParam as u32) as i32;
+                    log(&format!("Mouse click at: ({}, {})", x, y));
+                    // Get the rectangle of the email label
+                    let mut rect = std::mem::zeroed();
+                    GetWindowRect(h_email, &mut rect);
+                    // Convert label rect from screen to client coordinates
+                    let mut top_left = winapi::shared::windef::POINT { x: rect.left, y: rect.top };
+                    let mut bottom_right = winapi::shared::windef::POINT { x: rect.right, y: rect.bottom };
+                    ScreenToClient(about_hwnd, &mut top_left);
+                    ScreenToClient(about_hwnd, &mut bottom_right);
+                    if x >= top_left.x && x <= bottom_right.x && y >= top_left.y && y <= bottom_right.y {
+                    //if LOWORD(msg.wParam as u32) as i32 == ID_EMAIL_LABEL {
+                        ShellExecuteW(
+                            about_hwnd,
+                            widestring("open").as_ptr(),
+                            widestring(&format!("mailto:{}", APPEMAIL)).as_ptr(),
+                            null(),
+                            null(),
+                            SW_SHOWNORMAL,
+                        );
+                    }
+                }
+            }
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
     }
 }
 // =========
@@ -121,6 +304,11 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam
                     //AppendMenuW(hmenu_file, MF_SEPARATOR, 0, null_mut());
                     AppendMenuW(hmenu_file, MF_STRING, ID_FILE_EXIT as usize, widestring("Exit").as_ptr());
                     AppendMenuW(hmenu, MF_POPUP, hmenu_file as usize, widestring("File").as_ptr());
+                    // HELP MENU
+                    let hmenu_help = CreateMenu();
+                    AppendMenuW(hmenu_help, MF_STRING, ID_HELP_ABOUT as usize, widestring("About").as_ptr());
+                    AppendMenuW(hmenu, MF_POPUP, hmenu_help as usize, widestring("Help").as_ptr());
+                    // Set the menu to the window
                     SetMenu(hwnd, hmenu);
 
                     // Show the log file
@@ -159,6 +347,10 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam
                         drop(Box::from_raw(ptr));
                     }
                     PostQuitMessage(0);
+                    0
+                }
+                ID_HELP_ABOUT => {
+                    show_about_dialog(hwnd);
                     0
                 }
                 _ => DefWindowProcW(hwnd, msg, wparam, lparam),
@@ -268,7 +460,7 @@ pub fn main_window(shutdown_notify: Option<Arc<Notify>>, rx: std::sync::mpsc::Re
         let hwnd = CreateWindowExW(
             0,
             class_name.as_ptr(),
-            widestring("Scrollable Editor").as_ptr(),
+            widestring(APPNAME).as_ptr(),
             WS_OVERLAPPEDWINDOW | WS_VISIBLE,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
@@ -282,11 +474,16 @@ pub fn main_window(shutdown_notify: Option<Arc<Notify>>, rx: std::sync::mpsc::Re
         //*MAIN_HWND.lock().unwrap() = hwnd;
         // After window creation, spawn a thread to listen for notifications:
         let hwnd_usize = hwnd as usize;
+        let mut last_handled = Instant::now();
         std::thread::spawn(move || {
             let hwnd = hwnd_usize as HWND;
             while rx.recv().is_ok() {
                 unsafe {
-                    PostMessageW(hwnd, WM_NEW_DATA, 0, 0);
+                    //if last_handled.elapsed() >= Duration::from_secs(1) {
+                        PostMessageW(hwnd, WM_NEW_DATA, 0, 0);
+                        last_handled = Instant::now();
+                    //}
+                    // else: ignore this notification
                 }
             }
         });
