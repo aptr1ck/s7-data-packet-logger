@@ -1,3 +1,4 @@
+#[windows_subsystem = "windows"]
 mod sql;
 mod event_data;
 mod filehandling;

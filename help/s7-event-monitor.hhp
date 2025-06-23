@@ -1,0 +1,15 @@
+[OPTIONS]
+Compatibility=1.1 or later
+Compiled file=..\s7-event-monitor.chm
+Contents file=Table of Contents.hhc
+Default topic=getting_started.htm
+Display compile progress=No
+Index file=Index.hhk
+Language=0x1409 English (New Zealand)
+
+
+[FILES]
+getting_started.htm
+
+[INFOTYPES]
+

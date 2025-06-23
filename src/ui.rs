@@ -1,4 +1,5 @@
-use std::fs;
+use std::env;
+use std::process::Command;
 use std::ptr::{null, null_mut};
 use std::sync::Arc;
 use std::time::{Instant, Duration};
@@ -23,7 +24,9 @@ const ID_FILE_SAVE: u16 = 102;
 const ID_FILE_SAVE_AS: u16 = 103;
 const ID_FILE_EXIT: u16 = 100;
 const ID_FILE_NEW: u16 = 104;
-const ID_HELP_ABOUT: u16 = 200;
+const ID_HELP_TOC: u16 = 200;
+const ID_HELP_START: u16 = 201;
+const ID_HELP_ABOUT: u16 = 202;
 const ID_EMAIL_LABEL: i32 = 5001;
 const WM_NEW_DATA: u32 = WM_USER + 1;
 const LOG_LINES: usize = 500; // Number of lines to show in the log viewer
@@ -244,6 +247,15 @@ fn show_about_dialog(hwnd: HWND) {
 }
 // =========
 
+// Show Help File
+fn show_help() -> std::io::Result<()>{
+    let mut chm = env::current_exe()
+        .expect("Failed to get current executable path")
+        .with_file_name("s7-event-monitor.chm");
+    Command::new("hh.exe").arg(chm).spawn()?;
+    Ok(())
+}
+
 // =========
 // Log Viewer
 fn create_readonly_textbox(hwnd_parent: HWND) -> HWND {
@@ -306,8 +318,11 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam
                     AppendMenuW(hmenu, MF_POPUP, hmenu_file as usize, widestring("File").as_ptr());
                     // HELP MENU
                     let hmenu_help = CreateMenu();
+                    AppendMenuW(hmenu_help, MF_STRING, ID_HELP_TOC as usize, widestring("Table Of Contents").as_ptr());
+                    AppendMenuW(hmenu_help, MF_STRING, ID_HELP_START as usize, widestring("Getting Started").as_ptr());
+                    AppendMenuW(hmenu_help, MF_SEPARATOR, 0, null_mut());
                     AppendMenuW(hmenu_help, MF_STRING, ID_HELP_ABOUT as usize, widestring("About").as_ptr());
-                    AppendMenuW(hmenu, MF_POPUP, hmenu_help as usize, widestring("Help").as_ptr());
+                    AppendMenuW(hmenu, MF_POPUP | MF_HELP, hmenu_help as usize, widestring("Help").as_ptr());
                     // Set the menu to the window
                     SetMenu(hwnd, hmenu);
 
@@ -347,6 +362,14 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam
                         drop(Box::from_raw(ptr));
                     }
                     PostQuitMessage(0);
+                    0
+                }
+                ID_HELP_TOC => {
+                    show_help();
+                    0
+                }
+                ID_HELP_START => {
+                    show_help();
                     0
                 }
                 ID_HELP_ABOUT => {

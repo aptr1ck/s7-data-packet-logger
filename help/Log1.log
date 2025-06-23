@@ -1,0 +1,23 @@
+Microsoft HTML Help Compiler 4.74.8702
+
+Compiling c:\Users\tuitech\rust\tcp-server\help\s7-event-logger.chm
+
+HHC6000: Error: An internal file could not be created. Make certain there is enough disk space on the drive where you are compiling your file.
+HHC5007: Error: Fatal navigational compilation error. This is likely the result of an invalid contents (.hhc) file.
+
+
+The following files were not compiled:
+Microsoft HTML Help Compiler 4.74.8702
+
+Compiling c:\Users\tuitech\rust\tcp-server\help\s7-event-logger.chm
+
+
+Compile time: 0 minutes, 0 seconds
+1	Topic
+1	Local link
+0	Internet links
+0	Graphics
+
+
+Created c:\Users\tuitech\rust\tcp-server\help\s7-event-logger.chm, 10,676 bytes
+Compression increased file by 9,739 bytes.
