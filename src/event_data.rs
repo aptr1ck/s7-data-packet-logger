@@ -2,14 +2,16 @@
 // Event Data Packet Definition
 pub struct EventDataPacket {
     pub raw: Vec<u8>, // Raw bytes of the packet
-    pub event_code: u32, // 4 bytes for event type = 1 PLC DINT
+    pub data_type: u32, // 4 bytes for event type = 1 PLC DINT
     pub plc_packet_code: u32, // 4 bytes for PLC packet type = 1 PLC DINT
     pub data: Vec<u32>,  // Variable length data
 }
 
-pub fn system_packet(packet: &EventDataPacket) -> bool {
+pub fn is_system_packet(packet: &EventDataPacket) -> bool {
     // Check if the packet is a system packet based on event_code
-    packet.event_code == 12
+    // 12 = keep alive packet
+    packet.data_type == 12
+    // 50 = plc event packet
 }
 
 pub fn parse_event_data_packet(bytes: &[u8]) -> Option<EventDataPacket> {
@@ -18,7 +20,7 @@ pub fn parse_event_data_packet(bytes: &[u8]) -> Option<EventDataPacket> {
     }
 
     let raw = bytes.to_vec(); // Store the raw bytes
-    let event_code = u32::from_be_bytes(bytes[0..4].try_into().ok()?);
+    let data_type = u32::from_be_bytes(bytes[0..4].try_into().ok()?);
     let plc_packet_code = u32::from_be_bytes(bytes[4..8].try_into().ok()?);
 
     let mut data = Vec::new();
@@ -29,7 +31,7 @@ pub fn parse_event_data_packet(bytes: &[u8]) -> Option<EventDataPacket> {
 
     Some(EventDataPacket {
         raw,
-        event_code,
+        data_type,
         plc_packet_code,
         data,
     })

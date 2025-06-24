@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::{Instant, Duration};
 use tokio::sync::Notify;
 use winapi::um::winuser::*;
-//use winapi::um::winnt::{KEY_WRITE, KEY_READ, REG_DWORD, REG_SZ};
+use winapi::um::commctrl::{InitCommonControls, TCITEMW, TCM_INSERTITEMW, TCM_GETCURSEL, TCM_SETCURSEL,};
 use winapi::um::libloaderapi::{GetModuleHandleW, LoadLibraryW};
 use winapi::um::shellapi::ShellExecuteW;
 use winapi::um::wingdi::{GetTextExtentPoint32W, CreateFontW, FW_NORMAL, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, FF_DONTCARE};
@@ -15,6 +15,7 @@ use winapi::shared::minwindef::{LPARAM, LRESULT, UINT, WPARAM, LOWORD, HIWORD};
 use std::sync::Mutex;
 use once_cell::sync::Lazy;
 use crate::filehandling::*;
+use crate::ServerStatus;
 use crate::registryhandling::*;   
 use crate::utils::*;
 
@@ -30,10 +31,21 @@ const ID_HELP_ABOUT: u16 = 202;
 const ID_EMAIL_LABEL: i32 = 5001;
 const WM_NEW_DATA: u32 = WM_USER + 1;
 const LOG_LINES: usize = 500; // Number of lines to show in the log viewer
+const WINDOW_TABS: [&str; 2] = ["Log", "Status"];
 
 // Global Mutables.
 //static MAIN_HWND: Lazy<Mutex<HWND>> = Lazy::new(|| Mutex::new(std::ptr::null_mut()));
-static mut CHILD_VIEW: HWND = null_mut();
+static mut TAB_HWND: HWND = null_mut();
+static mut LOG_HWND: HWND = null_mut();
+static mut STS_HWND: HWND = null_mut();
+static mut STATUS_CONNECTED_HWND: HWND = null_mut();
+static mut STATUS_ALIVE_HWND: HWND = null_mut();
+// Server Status
+static mut SERVER_STATUS: ServerStatus = ServerStatus {
+    new_data: false,
+    is_connected: false,
+    is_alive: false,
+};
 
 // Keyboard Shortcuts
 static ACCELERATORS: [ACCEL; 4] = [
@@ -54,6 +66,7 @@ static WINDOW_STATE: Lazy<Mutex<WindowState>> = Lazy::new(|| {
         height: 600,
     })
 });
+
 
 // SetupGuard, to prevent commands during setup of a new or loaded file.
 static mut IS_SETTING_UP: bool = false;
@@ -298,6 +311,56 @@ fn create_readonly_textbox(hwnd_parent: HWND) -> HWND {
 }
 // =========
 
+// =========
+// Status View
+fn create_status_view(hwnd_parent: HWND) -> HWND {
+    unsafe {
+        let h_instance = GetModuleHandleW(null_mut());
+
+        // Create a static control for status view
+        STATUS_CONNECTED_HWND = CreateWindowExW(
+            0,
+            widestring("STATIC").as_ptr(),
+            widestring(&format!("Connected: {:?}",SERVER_STATUS.is_connected)).as_ptr(),
+            WS_CHILD | WS_VISIBLE | SS_LEFT,
+            10,
+            420,
+            600,
+            20,
+            hwnd_parent,
+            null_mut(),
+            h_instance,
+            null_mut(),
+        );
+        STATUS_ALIVE_HWND = CreateWindowExW(
+            0,
+            widestring("STATIC").as_ptr(),
+            widestring(&format!("Alive: {:?}",SERVER_STATUS.is_alive)).as_ptr(),
+            WS_CHILD | WS_VISIBLE | SS_LEFT,
+            10,
+            445,
+            600,
+            20,
+            hwnd_parent,
+            null_mut(),
+            h_instance,
+            null_mut(),
+        );
+
+        // Set the font for the status view
+        let font = CreateFontW(
+            16, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+            CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
+            widestring("").as_ptr(),
+        );
+        SendMessageW(STATUS_CONNECTED_HWND, WM_SETFONT, font as WPARAM, true as LPARAM);
+
+        return STATUS_CONNECTED_HWND;
+    }
+}
+// =========
+
+
 unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match msg {
         WM_CREATE => {
@@ -326,10 +389,43 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam
                     // Set the menu to the window
                     SetMenu(hwnd, hmenu);
 
+                    // Create Tab Control
+                    TAB_HWND = CreateWindowExW(
+                        0,
+                        widestring("SysTabControl32").as_ptr(),
+                        null_mut(),
+                        WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS,
+                        0, 0, 800, 600,
+                        hwnd,
+                        null_mut(),
+                        h_instance,
+                        null_mut(),
+                    );
+
+                    // Add "Log" tab
+                    {
+                        let mut tcitem: TCITEMW = std::mem::zeroed();
+                        tcitem.mask = winapi::um::commctrl::TCIF_TEXT;
+                        let log_tab = widestring("Log");
+                        tcitem.pszText = log_tab.as_ptr() as *mut u16;
+                        SendMessageW(TAB_HWND, TCM_INSERTITEMW, 0, &tcitem as *const _ as LPARAM);
+                    }
+                    // Add "Status" tab
+                    {
+                        let mut tcitem: TCITEMW = std::mem::zeroed();
+                        tcitem.mask = winapi::um::commctrl::TCIF_TEXT;
+                        let log_tab = widestring("Status");
+                        tcitem.pszText = log_tab.as_ptr() as *mut u16;
+                        SendMessageW(TAB_HWND, TCM_INSERTITEMW, 0, &tcitem as *const _ as LPARAM);
+                    }
                     // Show the log file
-                    CHILD_VIEW = create_readonly_textbox(hwnd);
-                    // Load the log file into the textbox
-                    //load_file_to_textbox(logview_hwnd, "log.txt");
+                    LOG_HWND = create_readonly_textbox(TAB_HWND);
+                    STS_HWND = create_status_view(TAB_HWND);
+                    // Initial tab view/hide
+                    ShowWindow(LOG_HWND, SW_HIDE);
+                    ShowWindow(STS_HWND, SW_SHOW);
+                    // Select the first tab (index 0)
+                    SendMessageW(TAB_HWND, TCM_SETCURSEL, 0, 0); 
                 }   
             }
             0
@@ -365,11 +461,11 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam
                     0
                 }
                 ID_HELP_TOC => {
-                    show_help();
+                    let _ = show_help();
                     0
                 }
                 ID_HELP_START => {
-                    show_help();
+                    let _ = show_help();
                     0
                 }
                 ID_HELP_ABOUT => {
@@ -380,7 +476,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam
             }
         }
 
-        WM_ACTIVATE => {
+        /*WM_ACTIVATE => {
             if DEBUG { println!("Window Activated."); }
             /*if LOWORD(wparam as u32) != WA_INACTIVE {
                 if let Some(line) = *LAST_FOCUSED_LINE.lock().unwrap() {
@@ -389,7 +485,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam
                 }
             }*/
             0
-        }
+        }*/
 
         /*WM_RESTORE_FOCUS => {
             let line = wparam as usize;
@@ -405,9 +501,9 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam
             let mut state = WINDOW_STATE.lock().unwrap();
             state.width = width;
             state.height = height;
-            if !CHILD_VIEW.is_null() {
+            if !TAB_HWND.is_null() {
                 SetWindowPos(
-                    CHILD_VIEW,
+                    TAB_HWND,
                     null_mut(),
                     0,
                     0,
@@ -415,14 +511,17 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam
                     height,
                     SWP_NOZORDER,
                     );
+                    // Resize the child view (e.g., log view) to fit inside the tab control
+                    // Adjust y and height for the tab header (typically ~30px)
+                    let tab_header_height = 30;
+                    SetWindowPos(
+                        LOG_HWND, // your log view HWND
+                        null_mut(),
+                        5, tab_header_height + 5,
+                        width - 10, height - tab_header_height - 10,
+                        SWP_NOZORDER,
+                    );
             }
-            /*let ptr = GetWindowLongPtrW(SCROLL_VIEW, GWLP_USERDATA) as *mut EditorState;
-            if !ptr.is_null() {
-                let editor = &mut *ptr;
-                update_editor_controls(SCROLL_VIEW, &mut *editor);//, Some(width), Some(height));
-            }*/
-            // Save window size and maximised state.
-            //save_window_state_to_registry(hwnd);
             0
         }
 
@@ -433,8 +532,41 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam
             if let Ok(content) = file_tail("log.txt",LOG_LINES) {//fs::read_to_string("log.txt") {
                 let wide_text = widestring(&content);
                 if DEBUG { log("Log file loaded into text box."); }
-                let result = SendMessageW(CHILD_VIEW, WM_SETTEXT, 0, wide_text.as_ptr() as LPARAM);
+                let result = SendMessageW(LOG_HWND, WM_SETTEXT, 0, wide_text.as_ptr() as LPARAM);
                 if DEBUG { log(&format!("WM_SETTEXT result: {}", result)); }
+            }
+            // Update status labels
+            unsafe {
+                let connected_text = widestring(&format!("Connected: {:?}", SERVER_STATUS.is_connected));
+                let alive_text = widestring(&format!("Alive: {:?}", SERVER_STATUS.is_alive));
+                if !STATUS_CONNECTED_HWND.is_null() {
+                    SetWindowTextW(STATUS_CONNECTED_HWND, connected_text.as_ptr());
+                }
+                if !STATUS_ALIVE_HWND.is_null() {
+                    SetWindowTextW(STATUS_ALIVE_HWND, alive_text.as_ptr());
+                }
+            }
+            0
+        }
+
+         WM_NOTIFY => {
+            let nmhdr = lparam as *const NMHDR;
+            if !nmhdr.is_null() && (*nmhdr).hwndFrom == TAB_HWND {
+                match (*nmhdr).code {
+                    TCN_SELCHANGE => {
+                        let sel = SendMessageW(TAB_HWND, TCM_GETCURSEL, 0, 0) as i32;
+                        // Show/hide views based on selected tab
+                        if sel == 0 {
+                            ShowWindow(LOG_HWND, SW_HIDE);
+                            ShowWindow(STS_HWND, SW_SHOW);
+                        } else if sel == 1 {
+                            ShowWindow(LOG_HWND, SW_SHOW);
+                            ShowWindow(STS_HWND, SW_HIDE);
+                        }
+                        return 0;
+                    }
+                    _ => {}
+                }
             }
             0
         }
@@ -462,7 +594,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam
     }
 }
 
-pub fn main_window(shutdown_notify: Option<Arc<Notify>>, rx: std::sync::mpsc::Receiver<()>) {
+pub fn main_window(shutdown_notify: Option<Arc<Notify>>, rx: std::sync::mpsc::Receiver<ServerStatus>) {
     unsafe {
         let h_instance = GetModuleHandleW(null_mut());
         let class_name = widestring("my_window_class");
@@ -497,16 +629,16 @@ pub fn main_window(shutdown_notify: Option<Arc<Notify>>, rx: std::sync::mpsc::Re
         //*MAIN_HWND.lock().unwrap() = hwnd;
         // After window creation, spawn a thread to listen for notifications:
         let hwnd_usize = hwnd as usize;
-        let mut last_handled = Instant::now();
+        //let mut last_handled = Instant::now();
         std::thread::spawn(move || {
             let hwnd = hwnd_usize as HWND;
-            while rx.recv().is_ok() {
+            while let Ok(server_status) = rx.recv() { //.is_ok() {
                 unsafe {
-                    //if last_handled.elapsed() >= Duration::from_secs(1) {
+                    SERVER_STATUS = server_status;
+                    if server_status.new_data {
                         PostMessageW(hwnd, WM_NEW_DATA, 0, 0);
-                        last_handled = Instant::now();
-                    //}
-                    // else: ignore this notification
+                        //last_handled = Instant::now();
+                    }
                 }
             }
         });

@@ -13,6 +13,7 @@ quick-xml = { version = "0.37.5", features = ["serialize"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 winapi = { version = "0.3.9", features = [
+    "commctrl",
     "libloaderapi",
     "errhandlingapi",
     "shellapi",

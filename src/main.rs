@@ -8,10 +8,11 @@ mod ui;
 mod xmlhandling;
 
 use std::sync::{Arc, mpsc};
+use quick_xml::de;
 use tokio::sync::Notify;
 use std::thread;
 //use std::io::{Read, Write};
-//use tokio::time::{timeout, Duration};
+use tokio::time::{timeout, Duration};
 use tokio::net::{TcpListener};//, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 //use rusqlite::{params, Connection, Result};
@@ -23,17 +24,30 @@ use crate::utils::*;
 use crate::ui::*;
 use crate::xmlhandling::*;
 
+#[derive(Clone, Copy)]
+pub struct ServerStatus {
+    new_data: bool,
+    is_connected: bool,
+    is_alive: bool,
+}
+
 async fn run_server(
     shutdown_notify: Arc<Notify>, 
     ip_address: String, 
     port: String,
-    tx: std::sync::mpsc::Sender<()>,
+    tx: std::sync::mpsc::Sender<ServerStatus>,
 ) -> std::io::Result<()> {
+    let server_status = ServerStatus {
+        new_data: false,
+        is_connected: false,
+        is_alive: false,
+    };
     let address = format!("{}:{}", ip_address, port); // TODO: Make this configurable
     let listener = TcpListener::bind(address).await?;
     if DEBUG { log(&format!("Server listening on {}:{}", ip_address, port)); }
   
     loop {
+        let mut server_status = server_status; // Clone the server status for each connection
         let tx = tx.clone(); // Clone the sender for each connection
         tokio::select! {
             accept_result = listener.accept() => {
@@ -41,6 +55,7 @@ async fn run_server(
                     Ok((mut socket, addr)) => {
                         //let (mut socket, addr) = listener.accept().await?;
                         log(&format!("New connection from {}", addr));
+                        server_status.is_connected = true;
                         // Initialize SQLite connection -- each connection needs its own database connection.
                         let conn = connect_to_db().expect("Failed to connect to database");
                         let shutdown_notify = shutdown_notify.clone(); // Clone for each task
@@ -52,18 +67,21 @@ async fn run_server(
                                         match read_result {
                                             Ok(0) => {
                                                 log("Connection closed by client.");
+                                                server_status.is_connected = false;
                                                 break;
                                             }
                                             Ok(size) => {
                                                 log(&format!("Received {} bytes: {:?}", size, &buffer[..size]));
+                                                server_status.is_alive = true;
+                                                server_status.new_data = true;
                                                 // Notify the UI thread about new data
-                                                let _ = tx.send(());
+                                                let _ = tx.send(server_status.clone());
                                                 // Deserialize the event data packet
                                                 if let Some(packet) = parse_event_data_packet(&buffer[..size]) {
                                                     log(&format!("Parsed packet: event_code={}, plc_packet_code={}, data={:?}",
-                                                                packet.event_code, packet.plc_packet_code, packet.data));
+                                                                packet.data_type, packet.plc_packet_code, packet.data));
                                                     // Check for system packet that we should not store.
-                                                    if !system_packet(&packet) {
+                                                    if !is_system_packet(&packet) {
                                                         // Put the data into the database
                                                         let _ = store_packet(&conn, &packet); // TODO: Handle the response properly.
                                                     }
@@ -84,6 +102,13 @@ async fn run_server(
                                                 break;
                                             }
                                         }
+                                    }
+                                    _ = tokio::time::sleep(Duration::from_secs(30)) => {
+                                        if DEBUG { log("No data recevied for 30 seconds.") };
+                                        server_status.is_alive = false;
+                                        // Notify the UI thread about the status change
+                                        server_status.new_data = true;
+                                        let _ = tx.send(server_status.clone());
                                     }
                                     _ = shutdown_notify.notified() => {
                                         if DEBUG { log("Shutdown signal received, closing connection."); }
@@ -114,12 +139,12 @@ async fn main() {//-> std::io::Result<()> {
     let shutdown_notify = Arc::new(Notify::new());
     let shutdown_notify_ui = shutdown_notify.clone();
 
-    // Channel for server-to-UI notifications
-    let (tx, rx) = mpsc::channel();
+    // Channel for UI to server notifications
+    let (tx, rx) = mpsc::channel::<ServerStatus>();
 
     // Spawn the WinAPI window in a separate thread
     thread::spawn(|| {
-        main_window(Some(shutdown_notify_ui), rx); // Your function here
+        main_window(Some(shutdown_notify_ui), rx);
     });
 
     // Load configuration from XML file

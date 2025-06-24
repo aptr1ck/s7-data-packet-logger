@@ -25,7 +25,7 @@ pub fn store_packet(conn: &Connection, packet: &EventDataPacket) -> rusqlite::Re
 
     conn.execute(
         "INSERT INTO event_data (timestamp, event_code, plc_packet_code, data) VALUES (?1, ?2, ?3, ?4)",
-        params![timestamp, packet.event_code, packet.plc_packet_code, data_json],
+        params![timestamp, packet.data_type, packet.plc_packet_code, data_json],
     )?;
     Ok(())
 }
