@@ -11,13 +11,15 @@ use winapi::um::shellapi::ShellExecuteW;
 use winapi::um::wingdi::{GetTextExtentPoint32W, CreateFontW, FW_NORMAL, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, FF_DONTCARE};
 use winapi::um::wingdi::{SelectObject, GetStockObject, SetTextColor, SetBkMode, TRANSPARENT, RGB};
 use winapi::shared::windef::{HBRUSH, HWND, SIZE, HGDIOBJ}; 
+use winapi::shared::windef::HMENU;
 use winapi::shared::minwindef::{LPARAM, LRESULT, UINT, WPARAM, LOWORD, HIWORD};
 use std::sync::Mutex;
 use once_cell::sync::Lazy;
+use crate::comms::ServerStatus;
 use crate::filehandling::*;
-use crate::ServerStatus;
 use crate::registryhandling::*;   
 use crate::utils::*;
+use crate::xmlhandling::load_config;
 
 // CONSTANTS
 const ID_FILE_OPEN: u16 = 101;
@@ -29,9 +31,9 @@ const ID_HELP_TOC: u16 = 200;
 const ID_HELP_START: u16 = 201;
 const ID_HELP_ABOUT: u16 = 202;
 const ID_EMAIL_LABEL: i32 = 5001;
+const ID_SAVE_CONFIG: u16 = 6001; // ID for the Save button in the status view
 const WM_NEW_DATA: u32 = WM_USER + 1;
 const LOG_LINES: usize = 500; // Number of lines to show in the log viewer
-const WINDOW_TABS: [&str; 2] = ["Log", "Status"];
 
 // Global Mutables.
 //static MAIN_HWND: Lazy<Mutex<HWND>> = Lazy::new(|| Mutex::new(std::ptr::null_mut()));
@@ -40,6 +42,8 @@ static mut LOG_HWND: HWND = null_mut();
 static mut STS_HWND: HWND = null_mut();
 static mut STATUS_CONNECTED_HWND: HWND = null_mut();
 static mut STATUS_ALIVE_HWND: HWND = null_mut();
+static mut EDIT_IP_HWND: HWND = null_mut();
+static mut EDIT_PORT_HWND: HWND = null_mut();
 // Server Status
 static mut SERVER_STATUS: ServerStatus = ServerStatus {
     new_data: false,
@@ -347,6 +351,66 @@ fn create_status_view(hwnd_parent: HWND) -> HWND {
             null_mut(),
         );
 
+        let label1 = CreateWindowExW(
+            0,
+            widestring("STATIC").as_ptr(),
+            widestring("IP Address:").as_ptr(),
+            WS_CHILD | WS_VISIBLE | SS_LEFT,
+            10, 480, 100, 20,
+            hwnd_parent,
+            null_mut(),
+            h_instance,
+            null_mut(),
+        );
+
+        EDIT_IP_HWND = CreateWindowExW(
+            0,
+            widestring("EDIT").as_ptr(),
+            null(),
+            WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
+            115, 480, 100, 20,
+            hwnd_parent,
+            null_mut(),
+            h_instance,
+            null_mut(),
+        );
+
+        let label2 = CreateWindowExW(
+            0,
+            widestring("STATIC").as_ptr(),
+            widestring("Port:").as_ptr(),
+            WS_CHILD | WS_VISIBLE | SS_LEFT,
+            225, 480, 70, 20,
+            hwnd_parent,
+            null_mut(),
+            h_instance,
+            null_mut(),
+        );
+
+        EDIT_PORT_HWND = CreateWindowExW(
+            0,
+            widestring("EDIT").as_ptr(),
+            null(),
+            WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
+            300, 480, 100, 20,
+            hwnd_parent,
+            null_mut(),
+            h_instance,
+            null_mut(),
+        );
+
+        let save_btn = CreateWindowExW(
+            0,
+            widestring("BUTTON").as_ptr(),
+            widestring("Save").as_ptr(),
+            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+            410, 480, 60, 22,
+            hwnd_parent,
+            ID_SAVE_CONFIG as HMENU,
+            h_instance,
+            null_mut(),
+        );
+
         // Set the font for the status view
         let font = CreateFontW(
             16, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
@@ -354,12 +418,38 @@ fn create_status_view(hwnd_parent: HWND) -> HWND {
             widestring("").as_ptr(),
         );
         SendMessageW(STATUS_CONNECTED_HWND, WM_SETFONT, font as WPARAM, true as LPARAM);
+        // Load config and set initial values
+        if let Ok(config) = load_config("config.xml") {
+            let ip_wide = widestring(&config.ip_address);
+            SetWindowTextW(EDIT_IP_HWND, ip_wide.as_ptr());
 
+            let port_str = config.port.to_string();
+            let port_wide = widestring(&port_str);
+            SetWindowTextW(EDIT_PORT_HWND, port_wide.as_ptr());
+        }
         return STATUS_CONNECTED_HWND;
     }
 }
 // =========
 
+static mut OLD_TAB_PROC: Option<unsafe extern "system" fn(HWND, UINT, WPARAM, LPARAM) -> LRESULT> = None;
+unsafe extern "system" fn tab_subclass_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    match msg {
+        WM_COMMAND => {
+            // Forward WM_COMMAND to the parent (main window)
+            let parent = GetParent(hwnd);
+            if !parent.is_null() {
+                return SendMessageW(parent, WM_COMMAND, wparam, lparam);
+            }
+        }
+        _ => {}
+    }
+    // Call the original window proc
+    if let Some(old_proc) = OLD_TAB_PROC {
+        return CallWindowProcW(Some(old_proc), hwnd, msg, wparam, lparam);
+    }
+    DefWindowProcW(hwnd, msg, wparam, lparam)
+}
 
 unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match msg {
@@ -401,6 +491,13 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam
                         h_instance,
                         null_mut(),
                     );
+                    // Subclass
+                    let old_proc = SetWindowLongPtrW(
+                        TAB_HWND,
+                        GWLP_WNDPROC,
+                        tab_subclass_proc as isize,
+                    );
+                    OLD_TAB_PROC = Some(std::mem::transmute(old_proc));
 
                     // Add "Log" tab
                     {
@@ -458,6 +555,33 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam
                         drop(Box::from_raw(ptr));
                     }
                     PostQuitMessage(0);
+                    0
+                }
+                ID_SAVE_CONFIG => {
+                    unsafe {
+                        // Get text from EDIT_IP_HWND and EDIT_PORT_HWND
+                        let mut ip_buf = [0u16; 64];
+                        let mut port_buf = [0u16; 16];
+                        let ip_len = GetWindowTextW(EDIT_IP_HWND, ip_buf.as_mut_ptr(), ip_buf.len() as i32);
+                        let port_len = GetWindowTextW(EDIT_PORT_HWND, port_buf.as_mut_ptr(), port_buf.len() as i32);
+
+                        let ip = String::from_utf16_lossy(&ip_buf[..ip_len as usize]);
+                        let port_str = String::from_utf16_lossy(&port_buf[..port_len as usize]);
+                        let port: u16 = port_str.trim().parse().unwrap_or(0);
+
+                        // Update your config struct (you may need to load it first)
+                        let mut config = crate::comms::ServerConfig {
+                            ip_address: ip,
+                            port,
+                        };
+
+                        // Save config
+                        if let Err(e) = crate::xmlhandling::save_config("config.xml", &config) {
+                            log(&format!("Failed to save config: {}", e));
+                        } else {
+                            log("Config saved.");
+                        }
+                    }
                     0
                 }
                 ID_HELP_TOC => {

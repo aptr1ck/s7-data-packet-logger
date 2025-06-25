@@ -1,4 +1,4 @@
-<config>
+<ServerConfig>
     <ip_address>0.0.0.0</ip_address>
     <port>10200</port>
-</config>
+</ServerConfig>
