@@ -1,12 +1,15 @@
-# APPNAME Here
+# S7 Event Monitor
 
 This application receives data packets from a Siemens PLC (via a TSEND), and stores them in a database.
+The intention is that the PLC will send us event data when certain things happen, and we have a timestamped log for diagnostics.
 
 ## Communication Specification
 
 *TODO*
 
 The application can receive up to 512 bytes.
+Packets sent from the PLC can be any length less than or equal to that 512 bytes, and they will be fully received by the application.
+Other functions within the app expect a particular format which is described below.
 
 It is expected that all data is 4 bytes in size. A `DINT` in the PLC, which equates to a `u32` in rust.
 
@@ -24,7 +27,7 @@ The structure is:
 
 ## Programming the PLC
 
-*TODO: Sample TIA Portal Program*
+There is a TIA V15.1 sample project inside this project. It shows how to setup the comms sending, and the triggering of events.
 
 ## Installing the Development Environment
 
@@ -35,7 +38,7 @@ The structure is:
 Rust has its own compiler, but you will need a linker to create Windows applications.
 Visual studio is possibly the simplest to get going, but the GNU toolchain (gcc) also works.
 
-Install Visual Studio Community Edition with these options:
+If you do use the Visual Studio linker, install Visual Studio Community Edition with these options:
 
 - C++ Desktop apps
 
