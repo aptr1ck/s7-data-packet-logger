@@ -3,6 +3,7 @@ use std::process::Command;
 use std::ptr::{null, null_mut};
 use std::sync::Arc;
 use std::time::{Instant, Duration};
+use chrono::{DateTime, Local, Utc};
 use tokio::sync::Notify;
 use winapi::um::winuser::*;
 use winapi::um::commctrl::{InitCommonControls, TCITEMW, TCM_INSERTITEMW, TCM_GETCURSEL, TCM_SETCURSEL,};
@@ -42,6 +43,7 @@ static mut LOG_HWND: HWND = null_mut();
 static mut STS_HWND: HWND = null_mut();
 static mut STATUS_CONNECTED_HWND: HWND = null_mut();
 static mut STATUS_ALIVE_HWND: HWND = null_mut();
+static mut STATUS_TIMESTAMP: HWND = null_mut();
 static mut EDIT_IP_HWND: HWND = null_mut();
 static mut EDIT_PORT_HWND: HWND = null_mut();
 // Server Status
@@ -49,6 +51,7 @@ static mut SERVER_STATUS: ServerStatus = ServerStatus {
     new_data: false,
     is_connected: false,
     is_alive: false,
+    last_packet_time: 0,
 };
 
 // Keyboard Shortcuts
@@ -117,7 +120,7 @@ fn show_about_dialog(hwnd: HWND) {
         let h_instance = GetModuleHandleW(null_mut());
         let class_name = widestring("about_dialog_class");
         let dialog_width = 350;
-        let hyperlink_font = unsafe {
+        let hyperlink_font = {
             CreateFontW(
                 16, 0, 0, 0, FW_NORMAL, 1, 1, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
                 CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
@@ -183,7 +186,7 @@ fn show_about_dialog(hwnd: HWND) {
         SendMessageW(h_email, WM_SETFONT, hyperlink_font as WPARAM, 1);
         
         // OK button
-        let h_ok = CreateWindowExW(
+        let _ = CreateWindowExW(
             0,
             widestring("BUTTON").as_ptr(),
             widestring("OK").as_ptr(),
@@ -266,7 +269,7 @@ fn show_about_dialog(hwnd: HWND) {
 
 // Show Help File
 fn show_help() -> std::io::Result<()>{
-    let mut chm = env::current_exe()
+    let chm = env::current_exe()
         .expect("Failed to get current executable path")
         .with_file_name("s7-event-monitor.chm");
     Command::new("hh.exe").arg(chm).spawn()?;
@@ -317,19 +320,20 @@ fn create_readonly_textbox(hwnd_parent: HWND) -> HWND {
 
 // =========
 // Status View
-fn create_status_view(hwnd_parent: HWND) -> HWND {
+fn update_status_view(hwnd_parent: HWND, y: i32) -> HWND {
     unsafe {
         let h_instance = GetModuleHandleW(null_mut());
+        let server_status = SERVER_STATUS; // Access the global server status
 
         // Create a static control for status view
         STATUS_CONNECTED_HWND = CreateWindowExW(
             0,
             widestring("STATIC").as_ptr(),
-            widestring(&format!("Connected: {:?}",SERVER_STATUS.is_connected)).as_ptr(),
+            widestring(&format!("Connected: {:?}",server_status.is_connected)).as_ptr(),
             WS_CHILD | WS_VISIBLE | SS_LEFT,
             10,
-            420,
-            600,
+            y,
+            130,
             20,
             hwnd_parent,
             null_mut(),
@@ -339,11 +343,40 @@ fn create_status_view(hwnd_parent: HWND) -> HWND {
         STATUS_ALIVE_HWND = CreateWindowExW(
             0,
             widestring("STATIC").as_ptr(),
-            widestring(&format!("Alive: {:?}",SERVER_STATUS.is_alive)).as_ptr(),
+            widestring(&format!("Alive: {:?}",server_status.is_alive)).as_ptr(),
+            WS_CHILD | WS_VISIBLE | SS_LEFT,
+            150,
+            y,
+            150,
+            20,
+            hwnd_parent,
+            null_mut(),
+            h_instance,
+            null_mut(),
+        );
+        // Timestamp of last packet received
+        let _ = CreateWindowExW(
+            0,
+            widestring("STATIC").as_ptr(),
+            widestring("Last packet received:").as_ptr(),
             WS_CHILD | WS_VISIBLE | SS_LEFT,
             10,
-            445,
-            600,
+            y+25,
+            150,
+            20,
+            hwnd_parent,
+            null_mut(),
+            h_instance,
+            null_mut(),
+        );
+        STATUS_TIMESTAMP = CreateWindowExW(
+            0,
+            widestring("STATIC").as_ptr(),
+            widestring(&format!("{:?}", server_status.last_packet_time)).as_ptr(),
+            WS_CHILD | WS_VISIBLE | SS_LEFT,
+            160,
+            y+25,
+            130,
             20,
             hwnd_parent,
             null_mut(),
@@ -351,12 +384,12 @@ fn create_status_view(hwnd_parent: HWND) -> HWND {
             null_mut(),
         );
 
-        let label1 = CreateWindowExW(
+        let _ = CreateWindowExW(
             0,
             widestring("STATIC").as_ptr(),
             widestring("IP Address:").as_ptr(),
             WS_CHILD | WS_VISIBLE | SS_LEFT,
-            10, 480, 100, 20,
+            300, y, 100, 20,
             hwnd_parent,
             null_mut(),
             h_instance,
@@ -368,19 +401,19 @@ fn create_status_view(hwnd_parent: HWND) -> HWND {
             widestring("EDIT").as_ptr(),
             null(),
             WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
-            115, 480, 100, 20,
+            415, y, 100, 20,
             hwnd_parent,
             null_mut(),
             h_instance,
             null_mut(),
         );
 
-        let label2 = CreateWindowExW(
+        let _ = CreateWindowExW(
             0,
             widestring("STATIC").as_ptr(),
             widestring("Port:").as_ptr(),
             WS_CHILD | WS_VISIBLE | SS_LEFT,
-            225, 480, 70, 20,
+            300, y+25, 70, 20,
             hwnd_parent,
             null_mut(),
             h_instance,
@@ -392,19 +425,19 @@ fn create_status_view(hwnd_parent: HWND) -> HWND {
             widestring("EDIT").as_ptr(),
             null(),
             WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
-            300, 480, 100, 20,
+            415, y+25, 100, 20,
             hwnd_parent,
             null_mut(),
             h_instance,
             null_mut(),
         );
 
-        let save_btn = CreateWindowExW(
+        let _ = CreateWindowExW(
             0,
             widestring("BUTTON").as_ptr(),
             widestring("Save").as_ptr(),
             WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-            410, 480, 60, 22,
+            530, y, 60, 44,
             hwnd_parent,
             ID_SAVE_CONFIG as HMENU,
             h_instance,
@@ -418,14 +451,20 @@ fn create_status_view(hwnd_parent: HWND) -> HWND {
             widestring("").as_ptr(),
         );
         SendMessageW(STATUS_CONNECTED_HWND, WM_SETFONT, font as WPARAM, true as LPARAM);
+        SendMessageW(STATUS_ALIVE_HWND, WM_SETFONT, font as WPARAM, true as LPARAM);
+        SendMessageW(STATUS_TIMESTAMP, WM_SETFONT, font as WPARAM, true as LPARAM);
         // Load config and set initial values
         if let Ok(config) = load_config("config.xml") {
+            // IP Address
             let ip_wide = widestring(&config.ip_address);
             SetWindowTextW(EDIT_IP_HWND, ip_wide.as_ptr());
-
+            // Port
             let port_str = config.port.to_string();
             let port_wide = widestring(&port_str);
             SetWindowTextW(EDIT_PORT_HWND, port_wide.as_ptr());
+            // Timestamp
+            let time_wide = widestring("No data received yet.");
+            SetWindowTextW(STATUS_TIMESTAMP, time_wide.as_ptr());
         }
         return STATUS_CONNECTED_HWND;
     }
@@ -517,13 +556,26 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam
                     }
                     // Show the log file
                     LOG_HWND = create_readonly_textbox(TAB_HWND);
-                    STS_HWND = create_status_view(TAB_HWND);
+                    STS_HWND = update_status_view(TAB_HWND, 30); // TODO: make y variable for multiple connections
                     // Initial tab view/hide
                     ShowWindow(LOG_HWND, SW_HIDE);
                     ShowWindow(STS_HWND, SW_SHOW);
                     // Select the first tab (index 0)
                     SendMessageW(TAB_HWND, TCM_SETCURSEL, 0, 0); 
                 }   
+            }
+            0
+        }
+
+        WM_GETMINMAXINFO => {
+            let minmax = lparam as *mut MINMAXINFO;
+            if !minmax.is_null() {
+                // Set minimum window size
+                (*minmax).ptMinTrackSize.x = 625;
+                (*minmax).ptMinTrackSize.y = 600;
+                // Optionally set maximum window size
+                // (*minmax).ptMaxTrackSize.x = 1200;
+                // (*minmax).ptMaxTrackSize.y = 900;
             }
             0
         }
@@ -570,7 +622,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam
                         let port: u16 = port_str.trim().parse().unwrap_or(0);
 
                         // Update your config struct (you may need to load it first)
-                        let mut config = crate::comms::ServerConfig {
+                        let config = crate::comms::ServerConfig {
                             ip_address: ip,
                             port,
                         };
@@ -650,8 +702,9 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam
         }
 
         WM_NEW_DATA => {
-            // Update your UI here (e.g., reload log file, show notification, etc.)
+            // New data received from the server, update UI
             if DEBUG { log("UI received new data notification."); }
+            let server_status = SERVER_STATUS; // Access the global server status
             // Load file and set text
             if let Ok(content) = file_tail("log.txt",LOG_LINES) {//fs::read_to_string("log.txt") {
                 let wide_text = widestring(&content);
@@ -661,8 +714,26 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam
             }
             // Update status labels
             unsafe {
-                let connected_text = widestring(&format!("Connected: {:?}", SERVER_STATUS.is_connected));
-                let alive_text = widestring(&format!("Alive: {:?}", SERVER_STATUS.is_alive));
+                let connected_text = widestring(&format!("Connected: {:?}", server_status.is_connected));
+                let alive_text = widestring(&format!("Alive: {:?}", server_status.is_alive));
+                
+                let timestamp = server_status.last_packet_time;
+                // Split into seconds and nanoseconds
+                let secs = (timestamp / 1000) as i64;
+                let nanos = ((timestamp % 1000) * 1_000_000) as u32;
+                let utc_dt = DateTime::<Utc>::from_timestamp(secs, nanos).unwrap();
+                let local_dt = utc_dt.with_timezone(&Local);
+                // Format the datetime as a string
+                let formatted = local_dt.format("%Y-%m-%d %H:%M:%S").to_string();
+                
+                // TIMESTAMP DISPLAY
+                if !formatted.is_empty() && timestamp > 0 {
+                    let timestamp_text = widestring(&formatted);
+                    SetWindowTextW(STATUS_TIMESTAMP, timestamp_text.as_ptr());
+                } else {
+                    SetWindowTextW(STATUS_TIMESTAMP, widestring("No data received yet").as_ptr());
+                }
+                // CONNECTED/ALIVE STATUS
                 if !STATUS_CONNECTED_HWND.is_null() {
                     SetWindowTextW(STATUS_CONNECTED_HWND, connected_text.as_ptr());
                 }
@@ -757,13 +828,13 @@ pub fn main_window(shutdown_notify: Option<Arc<Notify>>, rx: std::sync::mpsc::Re
         std::thread::spawn(move || {
             let hwnd = hwnd_usize as HWND;
             while let Ok(server_status) = rx.recv() { //.is_ok() {
-                unsafe {
+                //unsafe {
                     SERVER_STATUS = server_status;
                     if server_status.new_data {
                         PostMessageW(hwnd, WM_NEW_DATA, 0, 0);
                         //last_handled = Instant::now();
                     }
-                }
+                //}
             }
         });
 
@@ -787,13 +858,13 @@ pub fn main_window(shutdown_notify: Option<Arc<Notify>>, rx: std::sync::mpsc::Re
         }
 
         // Setup keyboard shortcuts
-        let hAccel = unsafe {
+        let h_accel = {
             CreateAcceleratorTableW(ACCELERATORS.as_ptr() as *mut ACCEL, ACCELERATORS.len() as i32)
         };
 
         let mut msg: MSG = std::mem::zeroed();
         while GetMessageW(&mut msg, null_mut(), 0, 0) > 0 {
-            if TranslateAcceleratorW(hwnd, hAccel, &mut msg) == 0 {
+            if TranslateAcceleratorW(hwnd, h_accel, &mut msg) == 0 {
                 // no accelerator -- handle normally
                 TranslateMessage(&msg);
                 DispatchMessageW(&msg);

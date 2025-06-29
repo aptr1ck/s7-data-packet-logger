@@ -24,7 +24,7 @@ pub fn store_packet(conn: &Connection, packet: &EventDataPacket) -> rusqlite::Re
     let data_json = serde_json::to_string(&packet.data).unwrap();
 
     conn.execute(
-        "INSERT INTO event_data (timestamp, event_code, plc_packet_code, data) VALUES (?1, ?2, ?3, ?4)",
+        "INSERT INTO event_data (timestamp, data_type, plc_packet_code, data) VALUES (?1, ?2, ?3, ?4)",
         params![timestamp, packet.data_type, packet.plc_packet_code, data_json],
     )?;
     Ok(())

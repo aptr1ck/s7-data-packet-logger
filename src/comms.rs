@@ -1,4 +1,6 @@
 use std::sync::{Arc, mpsc};
+use chrono::format::DelayedFormat;
+use chrono::Local;
 use serde::{Serialize, Deserialize};
 use tokio::sync::Notify;
 use tokio::time::{timeout, Duration};
@@ -13,6 +15,7 @@ pub struct ServerStatus {
     pub new_data: bool,
     pub is_connected: bool,
     pub is_alive: bool,
+    pub last_packet_time: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -31,6 +34,7 @@ pub async fn run_server(
         new_data: false,
         is_connected: false,
         is_alive: false,
+        last_packet_time: Local::now().timestamp_millis() as u64,
     };
     let address = format!("{}:{}", ip_address, port);
     let listener = loop {
@@ -80,12 +84,17 @@ pub async fn run_server(
                                                 let _ = tx.send(server_status.clone());
                                                 // Deserialize the event data packet
                                                 if let Some(packet) = parse_event_data_packet(&buffer[..size]) {
-                                                    log(&format!("Parsed packet: event_code={}, plc_packet_code={}, data={:?}",
+                                                    log(&format!("Parsed packet: data_type={}, plc_packet_code={}, data={:?}",
                                                                 packet.data_type, packet.plc_packet_code, packet.data));
                                                     // Check for system packet that we should not store.
                                                     if !is_system_packet(&packet) {
                                                         // Put the data into the database
-                                                        let _ = store_packet(&conn, &packet); // TODO: Handle the response properly.
+                                                        let result = store_packet(&conn, &packet); // TODO: Handle the response properly.
+                                                        server_status.last_packet_time = Local::now().timestamp_millis() as u64;
+                                                        if result.is_err() {
+                                                            if DEBUG { log(&format!("Error storing packet in database: {:?}", result)); }
+                                                            // TODO: Close the connection when we have SQL INSERT errors.
+                                                        }
                                                     }
                                                 } else {
                                                     log("Failed to parse event data packet.");
