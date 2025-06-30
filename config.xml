@@ -1,4 +1,12 @@
 <ServerConfig>
-    <ip_address>0.0.0.0</ip_address>
-    <port>10200</port>
+    <Server>
+        <name>Edger</name>
+        <ip_address>0.0.0.0</ip_address>
+        <port>10200</port>
+    </Server>
+    <Server>
+        <name>Headrig</name>
+        <ip_address>0.0.0.0</ip_address>
+        <port>10100</port>
+    </Server>
 </ServerConfig>

@@ -1,4 +1,4 @@
-#[windows_subsystem = "windows"]
+#![windows_subsystem = "windows"]
 
 mod comms;
 mod sql;
@@ -14,7 +14,7 @@ use tokio::sync::Notify;
 use std::thread;
 use crate::comms::*;
 use crate::ui::*;
-use crate::xmlhandling::*;
+use crate::utils::log;
 
 #[tokio::main]
 async fn main() {//-> std::io::Result<()> {
@@ -22,17 +22,33 @@ async fn main() {//-> std::io::Result<()> {
     let shutdown_notify_ui = shutdown_notify.clone();
 
     // Channel for UI to server notifications
-    let (tx, rx) = mpsc::channel::<ServerStatus>();
+    let (tx, rx) = mpsc::channel::<ServerStatusInfo>();
+    let (ui_ready_tx, ui_ready_rx) = mpsc::channel::<()>();
 
     // Spawn the WinAPI window in a separate thread
     thread::spawn(|| {
-        main_window(Some(shutdown_notify_ui), rx);
+        main_window(Some(shutdown_notify_ui), rx, ui_ready_tx);
     });
 
-    // Load configuration from XML file
-    let config = load_config("config.xml")
-        .expect("Failed to load configuration");
-    let ip_address = config.ip_address;
-    let port = config.port.to_string();
-    let _ = run_server(shutdown_notify, ip_address, port, tx).await;
+    // Wait for the UI to signal it's ready
+    ui_ready_rx.recv().expect("Failed to receive UI ready signal");
+
+    // Now start the servers
+    unsafe {
+        for i in 0..SERVER_CONFIG.servers.len() {
+            log(&format!("Starting server {}: {}:{}",
+                     i,
+                     SERVER_CONFIG.servers[i].ip_address,
+                     SERVER_CONFIG.servers[i].port));
+            let shutdown_notify = shutdown_notify.clone();
+            let tx = tx.clone();
+            let i = i;
+            tokio::spawn(async move {
+                let _ = run_server(shutdown_notify, i, tx).await;
+            });
+        }
+    }
+    
+    // Wait for shutdown signal (block main thread)
+    shutdown_notify.notified().await;
 }
