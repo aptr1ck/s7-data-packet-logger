@@ -51,7 +51,7 @@ async fn main() {
             let tx = tx.clone();
             let i = i;
             tokio::spawn(async move {
-                let _ = run_server(shutdown_notify, i, tx);//.await;
+                let _ = run_server(shutdown_notify, i, tx).await;
             });
         }
     }
