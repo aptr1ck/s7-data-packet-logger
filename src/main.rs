@@ -1,5 +1,6 @@
-#![windows_subsystem = "windows"]
+//#![windows_subsystem = "windows"]
 
+mod app_config;
 mod comms;
 mod sql;
 mod event_data;
@@ -7,33 +8,39 @@ mod filehandling;
 mod registryhandling;
 mod utils;
 mod ui;
+mod ui_floem;
 mod xmlhandling;
 
+use floem::{
+    action::{exec_after, inspect},
+    keyboard::{Key, Modifiers, NamedKey},
+    prelude::*,
+};
 use std::sync::{Arc, mpsc};
 use tokio::sync::Notify;
+use tokio::runtime::Runtime;
 use std::thread;
 use crate::comms::*;
 use crate::ui::*;
+use crate::ui_floem::*;
 use crate::utils::log;
 
+pub const OS_MOD: Modifiers = if cfg!(target_os = "macos") {
+    Modifiers::META
+} else {
+    Modifiers::CONTROL
+};
+
 #[tokio::main]
-async fn main() {//-> std::io::Result<()> {
+async fn main() {
     let shutdown_notify = Arc::new(Notify::new());
-    let shutdown_notify_ui = shutdown_notify.clone();
+    //let shutdown_notify_ui = shutdown_notify.clone();
 
     // Channel for UI to server notifications
     let (tx, rx) = mpsc::channel::<ServerStatusInfo>();
-    let (ui_ready_tx, ui_ready_rx) = mpsc::channel::<()>();
+    //let (ui_ready_tx, ui_ready_rx) = mpsc::channel::<()>();
 
-    // Spawn the WinAPI window in a separate thread
-    thread::spawn(|| {
-        main_window(Some(shutdown_notify_ui), rx, ui_ready_tx);
-    });
-
-    // Wait for the UI to signal it's ready
-    ui_ready_rx.recv().expect("Failed to receive UI ready signal");
-
-    // Now start the servers
+    // Start the servers
     unsafe {
         for i in 0..SERVER_CONFIG.servers.len() {
             log(&format!("Starting server {}: {}:{}",
@@ -44,11 +51,13 @@ async fn main() {//-> std::io::Result<()> {
             let tx = tx.clone();
             let i = i;
             tokio::spawn(async move {
-                let _ = run_server(shutdown_notify, i, tx).await;
+                let _ = run_server(shutdown_notify, i, tx);//.await;
             });
         }
     }
     
-    // Wait for shutdown signal (block main thread)
-    shutdown_notify.notified().await;
+    // Floem UI has to run on the main thread
+    app_config::launch_with_track(app_view);
+    // After UI exits, notify servers to shut down
+    shutdown_notify.notify_waiters();
 }

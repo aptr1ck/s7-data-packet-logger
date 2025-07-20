@@ -19,6 +19,7 @@ use std::sync::Mutex;
 use once_cell::sync::Lazy;
 use crate::comms::{ServerStatus, ServerStatusInfo, ServerEntry, SERVER_CONFIG, SERVER_STATUS};
 use crate::filehandling::*;
+use crate::ui_floem::*;
 use crate::registryhandling::*;   
 use crate::utils::*;
 use crate::xmlhandling::load_config;
@@ -896,8 +897,26 @@ pub fn main_window(
     shutdown_notify: Option<Arc<Notify>>, 
     rx: std::sync::mpsc::Receiver<ServerStatusInfo>,
     ui_ready_tx: Sender<()>) {
-    unsafe {
-        let h_instance = GetModuleHandleW(null_mut());
+        unsafe {
+            floem::launch(app_view);
+            let _ = ui_ready_tx.send(());
+            std::thread::spawn(move || {
+                //let hwnd = hwnd_usize as HWND;
+                while let Ok(server_status) = rx.recv() { //.is_ok() {
+                    //unsafe {
+                        //let mut glob_server_status = SERVER_STATUS.clone();
+                        SERVER_STATUS.server[server_status.idx] = server_status.clone();
+                        if server_status.new_data {
+                            //PostMessageW(hwnd, WM_NEW_DATA, server_status.idx as WPARAM, 0);
+                            //last_handled = Instant::now();
+                        }
+                    //}
+                }
+            });
+        }
+        //ui_ready_sent = true;
+    //unsafe {
+        /*let h_instance = GetModuleHandleW(null_mut());
         let class_name = widestring("my_window_class");
 
         
@@ -981,6 +1000,5 @@ pub fn main_window(
                 TranslateMessage(&msg);
                 DispatchMessageW(&msg);
             }
-        }
-    }
+        }*/*/
 }

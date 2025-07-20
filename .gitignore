@@ -2,3 +2,4 @@ target/
 Cargo.lock
 event_data.db
 log.txt
+config - Copy.xml
