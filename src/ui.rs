@@ -18,6 +18,7 @@ use winapi::shared::minwindef::{LPARAM, LRESULT, UINT, WPARAM, LOWORD, HIWORD};
 use std::sync::Mutex;
 use once_cell::sync::Lazy;
 use crate::comms::{ServerStatus, ServerStatusInfo, ServerEntry, SERVER_CONFIG, SERVER_STATUS};
+use crate::constants::*;
 use crate::filehandling::*;
 use crate::ui_floem::*;
 use crate::registryhandling::*;   
@@ -567,7 +568,7 @@ unsafe extern "system" fn tab_subclass_proc(hwnd: HWND, msg: UINT, wparam: WPARA
                 DestroyWindow(STS_HWND);
             }
             // Recreate with the new server list
-            let servers = &SERVER_CONFIG.servers;
+            let servers = &SERVER_CONFIG.server;
             STS_HWND = update_status_view(TAB_HWND, 30, servers.as_slice());
             ShowWindow(STS_HWND, SW_SHOW);
             return 0;
@@ -647,7 +648,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam
                     }
                     // Show the log file
                     LOG_HWND = create_readonly_textbox(TAB_HWND);
-                    let servers = &SERVER_CONFIG.servers;
+                    let servers = &SERVER_CONFIG.server;
                     let sts_hwnd = update_status_view(TAB_HWND, 30, servers.as_slice()); // TODO: make y variable for multiple connections
                     STS_HWND = sts_hwnd;
                     // Initial tab view/hide
@@ -720,8 +721,8 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam
                             let port: u16 = port_str.trim().parse().unwrap_or(0);
 
                             // Update config struct
-                            SERVER_CONFIG.servers[server_num].ip_address = ip.clone();
-                            SERVER_CONFIG.servers[server_num].port = port;
+                            SERVER_CONFIG.server[server_num].ip_address = ip.clone();
+                            SERVER_CONFIG.server[server_num].port = port;
                             println!("Saving config for server {}: IP={}, Port={}", server_num, ip, port);
 
                             // Save config

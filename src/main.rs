@@ -2,6 +2,7 @@
 
 mod app_config;
 mod comms;
+mod constants;
 mod sql;
 mod event_data;
 mod filehandling;
@@ -18,10 +19,7 @@ use floem::{
 };
 use std::sync::{Arc, mpsc};
 use tokio::sync::Notify;
-use tokio::runtime::Runtime;
-use std::thread;
 use crate::comms::*;
-use crate::ui::*;
 use crate::ui_floem::*;
 use crate::utils::log;
 
@@ -42,11 +40,11 @@ async fn main() {
 
     // Start the servers
     unsafe {
-        for i in 0..SERVER_CONFIG.servers.len() {
+        for i in 0..SERVER_CONFIG.server.len() {
             log(&format!("Starting server {}: {}:{}",
                      i,
-                     SERVER_CONFIG.servers[i].ip_address,
-                     SERVER_CONFIG.servers[i].port));
+                     SERVER_CONFIG.server[i].ip_address,
+                     SERVER_CONFIG.server[i].port));
             let shutdown_notify = shutdown_notify.clone();
             let tx = tx.clone();
             let i = i;

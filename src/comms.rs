@@ -6,6 +6,7 @@ use tokio::time::{Duration};
 use tokio::net::{TcpListener};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use winapi::um::winuser::PostMessageW;
+use crate::constants::DEBUG;
 use crate::sql::*;
 use crate::event_data::*;
 use crate::utils::*;
@@ -54,7 +55,7 @@ pub struct ServerStatusInfo {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ServerConfig {
     #[serde(rename = "Server")]
-    pub servers: Vec<ServerEntry>,
+    pub server: Vec<ServerEntry>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -66,7 +67,7 @@ pub struct ServerEntry {
 
 pub static mut SERVER_CONFIG: Lazy<ServerConfig> = Lazy::new(|| {
     load_config("config.xml").unwrap_or_else(|_| ServerConfig {
-        servers: vec![
+        server: vec![
             ServerEntry {
                 name: "Default Server".to_string(),
                 ip_address: "0.0.0.0".to_string(),
@@ -113,7 +114,7 @@ pub async fn run_server(
         //SERVER_STATUS[server_number] = server_status.clone();
     }
     log(&format!("server_status: {:?}", unsafe{&SERVER_STATUS}));
-    let config = match unsafe { SERVER_CONFIG.servers.get(server_number) } {
+    let config = match unsafe { SERVER_CONFIG.server.get(server_number) } {
         Some(cfg) => cfg,
         None => {
             log(&format!("ERROR: No server config for index {}", server_number));

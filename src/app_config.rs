@@ -11,6 +11,7 @@ use floem::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::constants::*;
 use crate::OS_MOD;
 
 #[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Debug)]
@@ -52,7 +53,7 @@ impl std::default::Default for AppConfig {
 }
 
 pub fn launch_with_track<V: IntoView + 'static>(app_view: impl FnOnce() -> V + 'static) {
-    let config: AppConfig = confy::load("my_app", "floem-defaults").unwrap_or_default();
+    let config: AppConfig = confy::load(APPNAME, "floem-defaults").unwrap_or_default();
 
     let app = Application::new();
 
@@ -65,7 +66,7 @@ pub fn launch_with_track<V: IntoView + 'static>(app_view: impl FnOnce() -> V + '
     create_updater(
         move || app_config.get(),
         |config| {
-            let _ = confy::store("my_app", "floem-defaults", config);
+            let _ = confy::store(APPNAME, "floem-defaults", config);
         },
     );
 

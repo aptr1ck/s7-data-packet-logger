@@ -13,6 +13,7 @@ use winapi::um::winnt::{KEY_WRITE, KEY_READ, REG_DWORD, REG_SZ};
 use winapi::shared::minwindef::HKEY;
 use winapi::shared::windef::HWND;
 use winapi::um::winuser::{GetWindowPlacement, WINDOWPLACEMENT, SW_SHOWMAXIMIZED};
+use crate::constants::*;
 use crate::utils::*;
 
 pub fn save_window_state_to_registry(hwnd: HWND) {
