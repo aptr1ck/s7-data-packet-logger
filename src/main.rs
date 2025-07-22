@@ -55,7 +55,7 @@ async fn main() {
     }
     
     // Floem UI has to run on the main thread
-    app_config::launch_with_track(app_view);
+    app_config::launch_with_track(|| app_view(rx));
     // After UI exits, notify servers to shut down
     shutdown_notify.notify_waiters();
 }

@@ -96,7 +96,7 @@ pub async fn run_server(
             is_alive: false,
             last_packet_time: 0 as u64,
         }) };
-    // Write it back to the global SERVER_STATUS
+    // Create a new one if it doesn't exist
     unsafe {
         if server_number >= SERVER_STATUS.server.len() {
             SERVER_STATUS.server.push(server_status.clone());
@@ -207,6 +207,13 @@ pub async fn run_server(
                                                     break;
                                                 } else {
                                                     if DEBUG { log("ACK sent to client."); }
+                                                }
+
+                                                // UPDATE: Update global state
+                                                unsafe {
+                                                    if server_number < SERVER_STATUS.server.len() {
+                                                        SERVER_STATUS.server[server_number] = server_status;
+                                                    }
                                                 }
                                             }
                                             Err(e) => {

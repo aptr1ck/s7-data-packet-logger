@@ -1,22 +1,19 @@
 use std::fs;
+use std::thread;
+use std::time::Duration;
+use std::sync::Arc;
 use im::Vector;
 use floem::{
-    prelude::*,
-    event::{Event, EventListener},
-    keyboard::{Key, NamedKey},
-    peniko::Color,
-    reactive::{create_signal, ReadSignal, SignalGet, SignalUpdate, WriteSignal},
-    style::{CursorStyle, Position},
-    text::Weight,
+    action::exec_after,
+    event::{Event, EventListener}, 
+    keyboard::{Key, NamedKey}, 
     menu::{Menu, MenuItem},
-    views::{button, container, h_stack, label, v_stack, scroll, Decorators},
-    style::{AlignContent},
-    window::{new_window, WindowConfig, WindowId},
-    IntoView, View, ViewId,
+    peniko::Color, prelude::*, 
+    reactive::{create_effect, create_signal, ReadSignal, SignalGet, SignalUpdate, WriteSignal}, style::{AlignContent, CursorStyle, Position}, text::Weight, views::{button, container, h_stack, label, scroll, v_stack, Decorators}, window::{new_window, WindowConfig, WindowId}, IntoView, View, ViewId
 };
 use crate::comms::{ServerEntry, ServerStatus};
 use crate::constants::*;
-use crate::{SERVER_STATUS, SERVER_CONFIG};
+use crate::{SERVER_STATUS, SERVER_CONFIG, ServerStatusInfo, mpsc::Receiver};
 use crate::utils::widestring;
 
 #[derive(Clone, Copy, Eq, Hash, PartialEq)]
@@ -69,9 +66,9 @@ fn tab_button(
 const TABBAR_HEIGHT: f64 = 37.0;
 const CONTENT_PADDING: f64 = 10.0;
 
-fn tab_content(tab: Tab) -> impl IntoView {
+fn tab_content(tab: Tab, status_signal: ReadSignal<Vec<ServerStatusInfo>>) -> impl IntoView {
     match tab {
-        Tab::Servers => container(server_stack()),
+        Tab::Servers => container(server_stack(status_signal)),
         Tab::Log => container(log_view()),
     }
 }
@@ -98,7 +95,7 @@ fn log_view() -> impl IntoView {
         })
 }
 
-fn tab_navigation_view() -> impl IntoView {
+fn tab_navigation_view(status_signal: ReadSignal<Vec<ServerStatusInfo>>) -> impl IntoView {
     let tabs = vec![Tab::Servers, Tab::Log]
         .into_iter()
         .collect::<Vector<Tab>>();
@@ -119,13 +116,14 @@ fn tab_navigation_view() -> impl IntoView {
             .border_color(Color::from_rgb8(205, 205, 205))
     });
 
+    //let status = status.clone();
     let main_content = container(
         scroll(
             tab(
                 move || active_tab.get(),
                 move || tabs.get(),
                 |it| *it,
-                |it| container(tab_content(it)),
+                move |it| container(tab_content(it, status_signal)),
             )
             .style(|s| s.padding(CONTENT_PADDING).padding_bottom(10.0)),
         )
@@ -156,19 +154,42 @@ fn window_menu(
             })
 }
 
-fn server_view(i: usize) -> impl IntoView {
+fn server_view(i: usize, status_signal: ReadSignal<Vec<ServerStatusInfo>>) -> impl IntoView {
     // Server Config Data
     let server = unsafe { &SERVER_CONFIG.server[i] };
     let name = server.name.clone();
     let ip_address = RwSignal::new(server.ip_address.clone());
     let port = RwSignal::new(server.port.clone().to_string());
     // Server Status Data
-    let server_status = unsafe { SERVER_STATUS.server[i] };
-    let last_packet_time = server_status.last_packet_time.clone().to_string();
+    let default_status = ServerStatusInfo {
+        idx: i,
+        new_data: false,
+        is_alive: false,
+        is_connected: false,
+        last_packet_time: 0,
+    };
+
+    //let server_status = status_signal.get().get(i).unwrap();//_or(&default_status);
+    //let server_status = status_signal.unwrap_or(default_status);
+    //let last_packet_time = server_status.last_packet_time.to_string();
     h_stack((
         v_stack((
             label(move || {name.clone()}).style(|s| s.font_size(20.0)),
-            label(move || {last_packet_time.clone()}).style(|s| s.font_size(20.0)),
+            label(move || {
+                status_signal.get().get(i)
+                    .map(|s| s.last_packet_time.to_string())
+                    .unwrap_or_else(|| "0".to_string())
+            }).style(|s| s.font_size(20.0)),
+            label(move || {
+                status_signal.get().get(i)
+                    .map(|s| if s.is_alive { "Alive".to_string() } else { "Not Alive".to_string() })
+                    .unwrap_or_else(|| "Not Alive".to_string())
+            }).style(move |s| {
+                let is_alive = status_signal.get().get(i)
+                    .map(|s| s.is_alive)
+                    .unwrap_or(false);
+                s.color(if is_alive { Color::from_rgb8(0, 255, 0) } else { Color::from_rgb8(255, 0, 0) })
+            }),
         )),
         v_stack((
             h_stack((
@@ -193,31 +214,72 @@ fn server_view(i: usize) -> impl IntoView {
     .style(|s| s.padding(10.0).gap(10.0))
 }
 
-fn server_stack() -> impl IntoView {
-    let server_stack = unsafe{
-        list(
-            SERVER_CONFIG.server
-            .iter().enumerate()
-            .map(|(i,server)| server_view(i))
-            .collect::<Vec<_>>()
-    )};
-    server_stack
+fn server_stack(status_signal: ReadSignal<Vec<ServerStatusInfo>>) -> impl IntoView {
+    let last_packet_time_label = label(move || {
+        status_signal.get().first().as_ref()
+            .map(|s| s.last_packet_time.to_string())
+            .unwrap_or_else(|| "N/A".to_string())
+    });
+
+    unsafe {
+        v_stack((
+            list(
+                SERVER_CONFIG.server
+                    .iter()
+                    .enumerate()
+                    .map(|(i, _server)| {
+                        //let status = status_signal.get().get(i).cloned();
+                        server_view(i, status_signal)
+                    })
+            ),
+            last_packet_time_label
+        ))
+    }
 }
 
-pub fn app_view() -> impl IntoView {
+pub fn app_view(rx: Receiver<ServerStatusInfo>) -> impl IntoView {
+    let (status_signal, set_status_signal) = create_signal(Vec::<ServerStatusInfo>::new());
+
+    // Convert rx to Arc<Mutex<>> so we can share it between contexts
+    let rx = std::sync::Arc::new(std::sync::Mutex::new(rx));
+    let rx_clone = rx.clone();
+
+    // Create a simple polling function
+    fn schedule_poll(
+        rx: std::sync::Arc<std::sync::Mutex<Receiver<ServerStatusInfo>>>,
+        set_status_signal: WriteSignal<Vec<ServerStatusInfo>>
+    ) {
+        if let Ok(rx_guard) = rx.try_lock() {
+            while let Ok(status) = rx_guard.try_recv() {
+                set_status_signal.update(|statuses| {
+                    // Update existing status or add new one
+                    if let Some(existing) = statuses.iter_mut().find(|s| s.idx == status.idx) {
+                        *existing = status;
+                    } else {
+                        statuses.push(status);
+                    }
+                });
+            }
+        }
+        
+        // Schedule the next poll
+        exec_after(Duration::from_millis(100), move |_| {
+            schedule_poll(rx, set_status_signal);
+        });
+    }
+
+    // Start the polling
+    schedule_poll(rx_clone, set_status_signal);
+
     let menu_bar = container(
         label(||"File")
         .popout_menu(
         ||{window_menu()})
     );
 
-    /*let server_stack = unsafe{list(
-            SERVER_CONFIG.servers.iter().map(|_server| server_view()).collect::<Vec<_>>()
-    )};*/
-
     let view = v_stack((
         menu_bar,
-        tab_navigation_view(),
+        tab_navigation_view(status_signal),
         //server_stack,
     ))
     .style(|s| s.width_full().height_full().flex_col().align_content(AlignContent::FlexStart));

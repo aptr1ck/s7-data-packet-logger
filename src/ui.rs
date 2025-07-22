@@ -899,7 +899,7 @@ pub fn main_window(
     rx: std::sync::mpsc::Receiver<ServerStatusInfo>,
     ui_ready_tx: Sender<()>) {
         unsafe {
-            floem::launch(app_view);
+            //floem::launch(app_view);
             let _ = ui_ready_tx.send(());
             std::thread::spawn(move || {
                 //let hwnd = hwnd_usize as HWND;
