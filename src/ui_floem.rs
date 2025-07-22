@@ -8,6 +8,7 @@ use im::Vector;
 use floem::{
     action::exec_after,
     event::{Event, EventListener}, 
+    style::FontStyle,
     keyboard::{Key, NamedKey}, 
     menu::{Menu, MenuItem},
     peniko::Color, prelude::*, 
@@ -96,6 +97,7 @@ fn log_view(status_signal: ReadSignal<Vec<ServerStatusInfo>>) -> impl IntoView {
             .style(|s| {
                 s.flex_col()
                     .width_full()
+                    //.background(Color::from_rgb8(240, 240, 240))
                     .class(LabelClass, |s| {
                         s.width_full()
                             .font_family("monospace".to_string()) 
@@ -109,7 +111,7 @@ fn log_view(status_signal: ReadSignal<Vec<ServerStatusInfo>>) -> impl IntoView {
         s.width_full()
             .height_full()
             .padding(5.0)
-            .background(Color::from_rgb8(240, 240, 240))
+            .background(Color::from_rgb8(255, 255, 255))
     })
 }
 
@@ -123,6 +125,18 @@ fn tab_navigation_view(status_signal: ReadSignal<Vec<ServerStatusInfo>>) -> impl
     let tabs_bar = h_stack((
         tab_button(Tab::Servers, tabs, set_active_tab, active_tab),
         tab_button(Tab::Log, tabs, set_active_tab, active_tab),
+        label(||"").style(|s| s.flex_grow(1.0)), // Spacer
+        button("Exit")
+            .action(|| {
+                floem::quit_app();
+            })
+            .style(|s| s.padding_horiz(10.0)
+                                .height_full()
+                                .cursor(CursorStyle::Pointer)
+                                .border(0.0)
+                                .background(Color::TRANSPARENT)
+                                .hover(|s| s.font_weight(Weight::BOLD).cursor(CursorStyle::Pointer).background(Color::TRANSPARENT))
+            ),
     ))
     .style(|s| {
         s.flex_row()
@@ -144,8 +158,8 @@ fn tab_navigation_view(status_signal: ReadSignal<Vec<ServerStatusInfo>>) -> impl
                 move |it| container(tab_content(it, status_signal)).style(|s| s.width_full().height_full()),
             )
             .style(|s| s.width_full()
-                                .padding(CONTENT_PADDING)
-                                .padding_bottom(10.0)
+                                //.padding(CONTENT_PADDING)
+                                //.padding_bottom(10.0)
                                 .flex_grow(1.0)),
         )
         .style(|s| s.width_full().flex_col().flex_basis(0).min_width(0).flex_grow(1.0)),
@@ -190,21 +204,21 @@ fn server_view(i: usize, status_signal: ReadSignal<Vec<ServerStatusInfo>>) -> im
         last_packet_time: 0,
     };
 
-    //let server_status = status_signal.get().get(i).unwrap();//_or(&default_status);
-    //let server_status = status_signal.unwrap_or(default_status);
-    //let last_packet_time = server_status.last_packet_time.to_string();
+    // Main h-stack for server view
     h_stack((
+        // Basic server info
         v_stack((
             label(move || {name.clone()}).style(|s| s.font_size(20.0)),
+            label(move || "").style(|s| s.flex_grow(1.0)), // Spacer
             label(move || {
                 status_signal.get().get(i)
                     .map(|s| {
                         let secs = (s.last_packet_time / 1000) as i64;
                         let nsec = ((s.last_packet_time % 1000) * 1_000_000) as u32;
                         let datetime = Local.timestamp_opt(secs, nsec).unwrap();
-                        datetime.format("%Y-%m-%d %H:%M:%S").to_string()})//s.last_packet_time).unwrap().format("%Y-%m-%d %H:%M:%S").to_string())})
-                    .unwrap_or_else(|| "0".to_string())
-            }).style(|s| s.font_size(20.0)),
+                        datetime.format("Last packet at %Y-%m-%d %H:%M:%S").to_string()})//s.last_packet_time).unwrap().format("%Y-%m-%d %H:%M:%S").to_string())})
+                    .unwrap_or_else(|| "No packets received.".to_string())
+            }).style(|s| s.font_size(12.0).font_style(floem::text::Style::Italic).color(Color::from_rgb8(100, 100, 100))),
             label(move || {
                 status_signal.get().get(i)
                     .map(|s| if s.is_alive { "Alive".to_string() } else { "Not Alive".to_string() })
@@ -213,33 +227,33 @@ fn server_view(i: usize, status_signal: ReadSignal<Vec<ServerStatusInfo>>) -> im
                 let is_alive = status_signal.get().get(i)
                     .map(|s| s.is_alive)
                     .unwrap_or(false);
-                s.color(if is_alive { Color::from_rgb8(0, 255, 0) } else { Color::from_rgb8(255, 0, 0) })
+                s.color(if is_alive { Color::from_rgb8(50, 200, 50) } else { Color::from_rgb8(200, 50, 50) })
             }),
-        )).style(|s| s.flex_grow(1.0)),
+        )).style(|s| s.flex_grow(1.0).gap(8.0).items_start()),
+        // Input fields for IP and Port
         v_stack((
             h_stack((
                 label(||"IP Address"),
                 text_input(ip_address),
-            )),
+            )).style(|s| s.justify_end().gap(10.0).items_center()),
             h_stack((
                 label(||"Port"),
                 text_input(port),
-            )),
-        ))
-        .style(|s| s.gap(5.0)),
+            )).style(|s| s.justify_end().gap(10.0).items_center()),
+        )).style(|s| s.gap(5.0)),
         v_stack((
             button("Start Server").action(|| {
                 println!("Start Server clicked!");
-            }),
+            }).style(|s| s.height_full()),
             button("Stop Server").action(|| {
                 println!("Stop Server clicked!");
-            }),
-        )),
+            }).style(|s| s.height_full()),
+        )).style(|s| s.gap(5.0)),
     ))
-    .style(|s| s.padding(10.0)
-                       .gap(10.0)
-                       .width_full()
-                       .flex_row())
+    .style(|s| s.padding(CONTENT_PADDING)
+                        .gap(5.0)
+                        .width_full()
+                        .flex_row())
 }
 
 fn server_stack(status_signal: ReadSignal<Vec<ServerStatusInfo>>) -> impl IntoView {
@@ -247,8 +261,11 @@ fn server_stack(status_signal: ReadSignal<Vec<ServerStatusInfo>>) -> impl IntoVi
         dyn_stack(
             move || (0..SERVER_CONFIG.server.len()).collect::<Vec<_>>(),
             |i| *i,
-            move |i| server_view(i, status_signal)
-        ).style(|s| s.width_full().height_full().flex_col().gap(5.0))
+            move |i| server_view(i, status_signal).style(|s| s.border_bottom(1).border_color(Color::from_rgb8(205, 205, 205)))
+        ).style(|s| s.width_full()
+                            .height_full()
+                            .flex_col()
+                            .gap(5.0))
     }
 }
 
@@ -286,14 +303,14 @@ pub fn app_view(rx: Receiver<ServerStatusInfo>) -> impl IntoView {
     // Start the polling
     schedule_poll(rx_clone, set_status_signal);
 
-    let menu_bar = container(
+    /*let menu_bar = container(
         label(||"File")
         .popout_menu(
         ||{window_menu()})
-    );
+    );*/
 
     let view = v_stack((
-        menu_bar,
+        //menu_bar,
         tab_navigation_view(status_signal),
         //server_stack,
     ))

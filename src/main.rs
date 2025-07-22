@@ -8,7 +8,6 @@ mod event_data;
 mod filehandling;
 mod registryhandling;
 mod utils;
-mod ui;
 mod ui_floem;
 mod xmlhandling;
 

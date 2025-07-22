@@ -5,12 +5,10 @@ use tokio::sync::Notify;
 use tokio::time::{Duration};
 use tokio::net::{TcpListener};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use winapi::um::winuser::PostMessageW;
 use crate::constants::DEBUG;
 use crate::sql::*;
 use crate::event_data::*;
 use crate::utils::*;
-use crate::ui::{TAB_HWND, WM_UPDATE_STATUS_VIEW};
 use crate::xmlhandling::load_config;
 use once_cell::sync::Lazy;
 
@@ -100,18 +98,7 @@ pub async fn run_server(
     unsafe {
         if server_number >= SERVER_STATUS.server.len() {
             SERVER_STATUS.server.push(server_status.clone());
-            // Update the UI
-            unsafe {
-                if !TAB_HWND.is_null() {
-                    PostMessageW(TAB_HWND, WM_UPDATE_STATUS_VIEW, 0, 0);
-                } else {
-                    log("TAB_HWND is null, cannot post WM_UPDATE_STATUS_VIEW");
-                }
-            }
-            //log(&format!("ERROR: Server number {} out of bounds for SERVER_STATUS", server_number));
-            //return Ok(());
         }
-        //SERVER_STATUS[server_number] = server_status.clone();
     }
     log(&format!("server_status: {:?}", unsafe{&SERVER_STATUS}));
     let config = match unsafe { SERVER_CONFIG.server.get(server_number) } {
@@ -128,25 +115,13 @@ pub async fn run_server(
     let listener = loop {
         let current_status_len = unsafe { SERVER_STATUS.server.len() };
         log(&format!("Current server status length: {}", current_status_len));
-        /*if current_status_len != prev_status_len {
-            log(&format!("Server status length changed from {} to {}", prev_status_len, current_status_len));
-            unsafe {
-                if !TAB_HWND.is_null() {
-                    PostMessageW(TAB_HWND, WM_UPDATE_STATUS_VIEW, 0, 0);
-                } else {
-                    log("TAB_HWND is null, cannot post WM_UPDATE_STATUS_VIEW");
-                }
-            }
-            prev_status_len = current_status_len;
-        }*/
         match TcpListener::bind(&address).await {
             Ok(l) => break l, // break with the listener
             Err(e) => {
                 log(&format!("Failed to bind to {}: {}. Retrying in 10 seconds...", address, e));
                 server_status.new_data = true; // Notify UI about the retry
                 tokio::time::sleep(Duration::from_secs(10)).await;
-                // TODO: Receive shutdown signal here to break the loop if needed
-                // TODO: Updating the log with new data doesn't work.
+                // TODO: Receive shutdown signal here to break the loop if needed?
             }
         }
     };
