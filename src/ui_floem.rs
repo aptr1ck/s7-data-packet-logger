@@ -2,6 +2,8 @@ use std::fs;
 use std::thread;
 use std::time::Duration;
 use std::sync::Arc;
+use chrono::Local;
+use chrono::TimeZone;
 use im::Vector;
 use floem::{
     action::exec_after,
@@ -9,12 +11,15 @@ use floem::{
     keyboard::{Key, NamedKey}, 
     menu::{Menu, MenuItem},
     peniko::Color, prelude::*, 
-    reactive::{create_effect, create_signal, ReadSignal, SignalGet, SignalUpdate, WriteSignal}, style::{AlignContent, CursorStyle, Position}, text::Weight, views::{button, container, h_stack, label, scroll, v_stack, Decorators}, window::{new_window, WindowConfig, WindowId}, IntoView, View, ViewId
+    reactive::{create_effect, create_memo, create_signal, ReadSignal, SignalGet, SignalUpdate, WriteSignal}, style::{AlignContent, CursorStyle, Position}, text::Weight, views::{button, container, h_stack, label, scroll, v_stack, Decorators}, window::{new_window, WindowConfig, WindowId}, IntoView, View, ViewId
 };
 use crate::comms::{ServerEntry, ServerStatus};
 use crate::constants::*;
+use crate::filehandling::file_tail;
 use crate::{SERVER_STATUS, SERVER_CONFIG, ServerStatusInfo, mpsc::Receiver};
-use crate::utils::widestring;
+use crate::utils::*;
+
+const LOG_LINES: usize = 500; // Number of lines to show in the log viewer
 
 #[derive(Clone, Copy, Eq, Hash, PartialEq)]
 enum Tab {
@@ -68,31 +73,44 @@ const CONTENT_PADDING: f64 = 10.0;
 
 fn tab_content(tab: Tab, status_signal: ReadSignal<Vec<ServerStatusInfo>>) -> impl IntoView {
     match tab {
-        Tab::Servers => container(server_stack(status_signal)),
-        Tab::Log => container(log_view()),
+        Tab::Servers => container(server_stack(status_signal)).style(|s| s.width_full().height_full()),
+        Tab::Log => container(log_view(status_signal)).style(|s| s.width_full().height_full()),
     }
 }
 
-fn log_view() -> impl IntoView {
-    // Read the log file and display its contents in a scrollable label
-    let log_content = fs::read_to_string("log.txt").unwrap_or_else(|_| String::from("Failed to read log file."));
-    let lines: Vector<String> = log_content.lines().map(|l| l.to_string()).collect();
-    VirtualStack::new(move || lines.clone())
-        .style(|s| {
-            s.flex_col().items_center().class(LabelClass, |s| {
-                s.padding_vert(2.5).width_full()
+fn log_view(status_signal: ReadSignal<Vec<ServerStatusInfo>>) -> impl IntoView {
+    let (log_lines_signal, set_log_lines_signal) = create_signal(Vector::<String>::new());
+    
+    create_effect(move |_| {
+        let _status = status_signal.get();
+        
+        let log_content = file_tail("log.txt", LOG_LINES)
+            .unwrap_or_else(|_| String::from("Failed to read log file."));
+        
+        let lines: Vector<String> = log_content.lines().map(|l| l.to_string()).collect();
+        set_log_lines_signal.set(lines);
+    });
+
+    scroll(
+        VirtualStack::new(move || log_lines_signal.get())
+            .style(|s| {
+                s.flex_col()
+                    .width_full()
+                    .class(LabelClass, |s| {
+                        s.width_full()
+                            .font_family("monospace".to_string()) 
+                            .font_size(13.0)
+                            .padding_vert(1.0)
+                            //.height(16.0) // Fixed height per line
+                    })
             })
-        })
-        .scroll()
-        //.style(|s| s.size_pct(50., 75.).border(1.0))
-        .container()
-        .style(|s| {
-            s.size(100.pct(), 100.pct())
-                .padding_vert(20.0)
-                .flex_col()
-                .items_center()
-                .justify_center()
-        })
+    )
+    .style(|s| {
+        s.width_full()
+            .height_full()
+            .padding(5.0)
+            .background(Color::from_rgb8(240, 240, 240))
+    })
 }
 
 fn tab_navigation_view(status_signal: ReadSignal<Vec<ServerStatusInfo>>) -> impl IntoView {
@@ -123,11 +141,14 @@ fn tab_navigation_view(status_signal: ReadSignal<Vec<ServerStatusInfo>>) -> impl
                 move || active_tab.get(),
                 move || tabs.get(),
                 |it| *it,
-                move |it| container(tab_content(it, status_signal)),
+                move |it| container(tab_content(it, status_signal)).style(|s| s.width_full().height_full()),
             )
-            .style(|s| s.padding(CONTENT_PADDING).padding_bottom(10.0)),
+            .style(|s| s.width_full()
+                                .padding(CONTENT_PADDING)
+                                .padding_bottom(10.0)
+                                .flex_grow(1.0)),
         )
-        .style(|s| s.flex_col().flex_basis(0).min_width(0).flex_grow(1.0)),
+        .style(|s| s.width_full().flex_col().flex_basis(0).min_width(0).flex_grow(1.0)),
     )
     .style(|s| {
         s.position(Position::Absolute)
@@ -177,7 +198,11 @@ fn server_view(i: usize, status_signal: ReadSignal<Vec<ServerStatusInfo>>) -> im
             label(move || {name.clone()}).style(|s| s.font_size(20.0)),
             label(move || {
                 status_signal.get().get(i)
-                    .map(|s| s.last_packet_time.to_string())
+                    .map(|s| {
+                        let secs = (s.last_packet_time / 1000) as i64;
+                        let nsec = ((s.last_packet_time % 1000) * 1_000_000) as u32;
+                        let datetime = Local.timestamp_opt(secs, nsec).unwrap();
+                        datetime.format("%Y-%m-%d %H:%M:%S").to_string()})//s.last_packet_time).unwrap().format("%Y-%m-%d %H:%M:%S").to_string())})
                     .unwrap_or_else(|| "0".to_string())
             }).style(|s| s.font_size(20.0)),
             label(move || {
@@ -190,7 +215,7 @@ fn server_view(i: usize, status_signal: ReadSignal<Vec<ServerStatusInfo>>) -> im
                     .unwrap_or(false);
                 s.color(if is_alive { Color::from_rgb8(0, 255, 0) } else { Color::from_rgb8(255, 0, 0) })
             }),
-        )),
+        )).style(|s| s.flex_grow(1.0)),
         v_stack((
             h_stack((
                 label(||"IP Address"),
@@ -211,29 +236,19 @@ fn server_view(i: usize, status_signal: ReadSignal<Vec<ServerStatusInfo>>) -> im
             }),
         )),
     ))
-    .style(|s| s.padding(10.0).gap(10.0))
+    .style(|s| s.padding(10.0)
+                       .gap(10.0)
+                       .width_full()
+                       .flex_row())
 }
 
 fn server_stack(status_signal: ReadSignal<Vec<ServerStatusInfo>>) -> impl IntoView {
-    let last_packet_time_label = label(move || {
-        status_signal.get().first().as_ref()
-            .map(|s| s.last_packet_time.to_string())
-            .unwrap_or_else(|| "N/A".to_string())
-    });
-
     unsafe {
-        v_stack((
-            list(
-                SERVER_CONFIG.server
-                    .iter()
-                    .enumerate()
-                    .map(|(i, _server)| {
-                        //let status = status_signal.get().get(i).cloned();
-                        server_view(i, status_signal)
-                    })
-            ),
-            last_packet_time_label
-        ))
+        dyn_stack(
+            move || (0..SERVER_CONFIG.server.len()).collect::<Vec<_>>(),
+            |i| *i,
+            move |i| server_view(i, status_signal)
+        ).style(|s| s.width_full().height_full().flex_col().gap(5.0))
     }
 }
 
@@ -282,7 +297,7 @@ pub fn app_view(rx: Receiver<ServerStatusInfo>) -> impl IntoView {
         tab_navigation_view(status_signal),
         //server_stack,
     ))
-    .style(|s| s.width_full().height_full().flex_col().align_content(AlignContent::FlexStart));
+    .style(|s| s.width_full().height_full().flex_col());//.align_content(AlignContent::FlexStart));
 
     let id = view.id();
     //let window_id = 0 as WindowId;//floem::window::WindowContext;
