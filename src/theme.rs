@@ -30,10 +30,11 @@ pub fn get_current_theme() -> Theme {
 }
 
 pub fn solarized_base0() -> Color {
-    match get_current_theme() {
-        Theme::Light => Color::from_rgb8(101, 123, 131),   // base00  // 131, 148, 150), // base0
-        Theme::Dark => Color::from_rgb8(101, 123, 131),   // base00
-    }
+     Color::from_rgb8(131, 148, 150) // base0
+}
+
+pub fn solarized_base00() -> Color {
+     Color::from_rgb8(101, 123, 131) // base00
 }
 
 pub fn solarized_base1() -> Color {
@@ -43,10 +44,38 @@ pub fn solarized_base1() -> Color {
     }
 }
 
+pub fn solarized_base01() -> Color {
+    match get_current_theme() {
+        Theme::Light => Color::from_rgb8(88, 110, 117),   // base01
+        Theme::Dark => Color::from_rgb8(147, 161, 161), // base1
+    }
+}
+
+pub fn solarized_base1_8() -> Color {
+    match get_current_theme() {
+        Theme::Light => Color::from_rgb8(211, 203, 183), // base1.8
+        Theme::Dark => Color::from_rgb8(7, 54, 66),     // base02 TODO
+    }
+}
+
+pub fn solarized_base1_9() -> Color {
+    match get_current_theme() {
+        Theme::Light => Color::from_rgb8(217, 210, 194), // base1.9
+        Theme::Dark => Color::from_rgb8(7, 54, 66),     // base02 TODO
+    }
+}
+
 pub fn solarized_base2() -> Color {
     match get_current_theme() {
         Theme::Light => Color::from_rgb8(238, 232, 213), // base2
         Theme::Dark => Color::from_rgb8(7, 54, 66),     // base02
+    }
+}
+
+pub fn solarized_base02() -> Color {
+    match get_current_theme() {
+        Theme::Light => Color::from_rgb8(7, 54, 66),     // base02
+        Theme::Dark => Color::from_rgb8(238, 232, 213), // base2
     }
 }
 

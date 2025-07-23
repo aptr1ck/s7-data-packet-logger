@@ -62,7 +62,12 @@ fn tab_button(
         })
         .style(move |s| {
             s.width(70)
-                .hover(|s| s.font_weight(Weight::BOLD).cursor(CursorStyle::Pointer))
+                .height_full()
+                .items_center()
+                .justify_center()
+                .color(solarized_base0())
+                .background(solarized_base1_8())
+                .hover(|s| s.font_weight(Weight::BOLD).color(solarized_base02()).cursor(CursorStyle::Pointer))
                 .apply_if(
                     active_tab.get()
                         == tabs
@@ -70,7 +75,7 @@ fn tab_button(
                             .iter()
                             .position(|it| *it == this_tab)
                             .unwrap(),
-                    |s| s.font_weight(Weight::BOLD),
+                    |s| s.font_weight(Weight::BOLD).color(solarized_base01()).background(solarized_base3()),
                 )
         })
 }
@@ -105,7 +110,7 @@ fn log_view(status_signal: ReadSignal<ServerStatus>) -> impl IntoView {
                         s.width_full()
                             .font_family("monospace".to_string()) 
                             .font_size(13.0)
-                            .color(solarized_base0())
+                            .color(solarized_base01())
                             .padding_vert(1.0)
                             //.height(16.0) // Fixed height per line
                     })
@@ -129,27 +134,15 @@ fn tab_navigation_view(status_signal: ReadSignal<ServerStatus>/*Vec<ServerStatus
     let tabs_bar = h_stack((
         tab_button(Tab::Servers, tabs, set_active_tab, active_tab),
         tab_button(Tab::Log, tabs, set_active_tab, active_tab),
-        label(||"").style(|s| s.flex_grow(1.0)), // Spacer
-        button("Exit")
-            .action(|| {
-                floem::quit_app();
-            })
-            .style(|s| s.padding_horiz(CONTENT_PADDING)
-                                .height_full()
-                                .cursor(CursorStyle::Pointer)
-                                .border(0.0)
-                                .background(Color::TRANSPARENT)
-                                .hover(|s| s.font_weight(Weight::BOLD).cursor(CursorStyle::Pointer).background(Color::TRANSPARENT))
-            ),
     ))
     .style(|s| {
         s.flex_row()
             .width_full()
             .height(TABBAR_HEIGHT)
             .min_height(TABBAR_HEIGHT)
-            .col_gap(5)
-            .padding_left(CONTENT_PADDING as i32)
-            .background(solarized_base3())
+            .col_gap(2)
+            //.padding_left(CONTENT_PADDING as i32)
+            .background(solarized_base1_9())
             .items_center()
     });
 
@@ -179,8 +172,7 @@ fn tab_navigation_view(status_signal: ReadSignal<ServerStatus>/*Vec<ServerStatus
     let settings_view = v_stack((tabs_bar, main_content))
         .style(|s| s.width_full()   
         .height_full()
-        .padding(BORDER_PADDING)
-        .gap(BORDER_PADDING)
+        //.gap(BORDER_PADDING)
     );
     settings_view
 }
@@ -217,10 +209,11 @@ fn server_view(i: usize, status_signal: ReadSignal<ServerStatus>/*Vec<ServerStat
             //label(move || {name.clone()}).style(|s| s.font_size(20.0)),
             text_input(name).style(|s| s.font_size(20.0)
                                                         .background(Color::TRANSPARENT)
+                                                        .color(solarized_base01())
                                                         .hover(|s| s.background(Color::TRANSPARENT))
                                                         .padding(0.0)
                                                         .border(0.0)),
-            label(move || {status_signal.get().get_ip_string(i)}).style(|s| s.font_size(12.0)),
+            label(move || {status_signal.get().get_ip_string(i)}).style(|s| s.font_size(12.0).color(solarized_base01())),
             label(move || "").style(|s| s.font_size(6.0).flex_grow(1.0)), // Spacer
             label(move || {
                 status_signal.get().server.get(i)
@@ -286,11 +279,11 @@ fn server_view(i: usize, status_signal: ReadSignal<ServerStatus>/*Vec<ServerStat
             h_stack((
                 label(||"IP Address"),
                 text_input(ip_address),
-            )).style(|s| s.justify_end().gap(10.0).items_center()),
+            )).style(|s| s.justify_end().gap(CONTENT_PADDING).items_center().color(solarized_base01())),
             h_stack((
                 label(||"Port"),
                 text_input(port),
-            )).style(|s| s.justify_end().gap(10.0).items_center()),
+            )).style(|s| s.justify_end().gap(CONTENT_PADDING).items_center().color(solarized_base01())),
             button("Save")
                 .action(move || {
                     // Save the server configuration
@@ -307,41 +300,42 @@ fn server_view(i: usize, status_signal: ReadSignal<ServerStatus>/*Vec<ServerStat
                         } else {
                             log("Config saved.");
                         }
-                        println!("Saved server {}: {}:{}", i, new_ip, new_port);
+                        if DEBUG { println!("Saved server {}: {}:{}", i, new_ip, new_port); }
                     }
-                }).style(|s| s.width(100.0).height(30.0)),
+                }).style(|s| s.width(100.0).height(30.0).color(solarized_base01())),
         )).style(|s| s.gap(5.0).items_end()),
         v_stack((
             {
                 //let command_tx = command_tx.clone();
                 button("Start Server").action(move || {
                     let _ = start_command_tx.send(ServerCommand::Start(i));
-                }).style(|s| s.height_full())
+                }).style(|s| s.height_full().color(solarized_base01()))
             },
             {
                 //let command_tx = command_tx.clone();
                 button("Stop Server").action(move || {
                     let _ = stop_command_tx.send(ServerCommand::Stop(i));
-                }).style(|s| s.height_full())
+                }).style(|s| s.height_full().color(solarized_base01()))
             },
         )).style(|s| s.gap(5.0)),
     ))
-    .style(|s| s.background(solarized_base3())
+    .style(|s| s.background(solarized_base2())
                         .padding(CONTENT_PADDING)
                         .gap(BORDER_PADDING)
                         .width_full()
                         .flex_row())
 }
 
-fn server_stack(status_signal: ReadSignal<ServerStatus>/*Vec<ServerStatusInfo>>*/, command_tx: mpsc::UnboundedSender<ServerCommand>) -> impl IntoView {
+fn server_stack(status_signal: ReadSignal<ServerStatus>, command_tx: mpsc::UnboundedSender<ServerCommand>) -> impl IntoView {
     unsafe {
         dyn_stack(
             move || (0..SERVER_CONFIG.server.len()).collect::<Vec<_>>(),
             |i| *i,
             move |i| server_view(i, status_signal, command_tx.clone())
-            //.style(|s| s.background(solarized_base3()))
+            .style(|s| s.background(solarized_base2()))
         ).style(|s| s.width_full()
                             .height_full()
+                            .padding(BORDER_PADDING)
                             .gap(CONTENT_PADDING)
                             )
     }
