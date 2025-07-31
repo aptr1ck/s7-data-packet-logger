@@ -72,7 +72,7 @@ pub fn launch_with_track<V: IntoView + 'static>(app_view: impl FnOnce() -> V + '
 
     let window_config = WindowConfig::default()
         .size(app_config.with(|ac| ac.size))
-        .min_size(Size::new(500.0, 300.0))
+        .min_size(Size::new(600.0, 300.0))
         .position(app_config.with(|ac| ac.position));
 
     app.window(

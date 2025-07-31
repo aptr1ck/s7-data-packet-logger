@@ -19,17 +19,37 @@ pub enum ServerCommand {
     Start(usize),
     Stop(usize),
     StopAll,
+    AddServer(ServerEntry),
+    RemoveServer(usize),
 }
 
 #[derive(Clone, Copy, Debug)]
 pub struct ServerStatusInfo {
     pub idx: usize,
+    pub server_id: [u8; 32], // Unique identifier for the server
     pub new_data: bool,
     pub is_running: bool,
     pub is_connected: bool,
     pub is_alive: bool,
     pub last_packet_time: u64,
     pub peer_ip: [u8; 16], // Can hold IPv4 or IPv6, convert to/from string as needed
+}
+impl ServerStatusInfo {
+    pub fn set_server_id(&mut self, id: &str) {
+        let mut id_bytes = [0u8; 32];
+        let bytes = id.as_bytes();
+        let len = bytes.len().min(32);
+        id_bytes[..len].copy_from_slice(&bytes[..len]);
+        self.server_id = id_bytes;
+    }
+    
+    pub fn get_server_id(&self) -> &[u8; 32] {
+        &self.server_id
+    }
+    
+    pub fn matches_server_id(&self, id: &[u8; 32]) -> bool {
+        self.get_server_id() == id
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -42,6 +62,7 @@ impl ServerStatus {
         ServerStatus {
             server: vec![ServerStatusInfo {
                 idx: 0,
+                server_id: generate_server_id(),
                 new_data: false,
                 is_running: false,
                 is_connected: false,
@@ -65,6 +86,12 @@ impl ServerStatus {
     }
 
     pub fn get_ip_string(&self, i: usize) -> String {
+        // Check bounds first
+        if i >= self.server.len() {
+            log(&format!("Warning: Requested IP string for server {} but only {} servers exist", i, self.server.len()));
+            return "x.x.x.x".to_string();
+        }
+
         // Check if it's IPv4 (first 4 bytes non-zero, rest zero)
         log(&format!("Getting IP string for server {}: {:?}", i, self.server[i].peer_ip));
         if self.server[i].peer_ip[4..].iter().all(|&x| x == 0) {
@@ -108,18 +135,32 @@ pub struct ServerConfig {
     pub server: Vec<ServerEntry>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerEntry {
+    #[serde(default = "generate_server_id")]
+    pub id: [u8; 32], // Unique identifier for each server
     pub name: String,
     pub ip_address: String,
     pub port: u16,
     pub autostart: bool,
 }
 
+// Helper function to generate unique server IDs
+pub fn generate_server_id() -> [u8;32] {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let id_string = format!("{}", timestamp);
+    string_to_fixed_array(&id_string)
+}
+
 pub static mut SERVER_CONFIG: Lazy<ServerConfig> = Lazy::new(|| {
     load_config("config.xml").unwrap_or_else(|_| ServerConfig {
         server: vec![
             ServerEntry {
+                id: generate_server_id(),
                 name: "Default Server".to_string(),
                 ip_address: "0.0.0.0".to_string(),
                 port: 2000,
@@ -154,6 +195,7 @@ impl ServerManager {
         for i in 0..server_count {
             server_status.server.push(ServerStatusInfo {
                 idx: i,
+                server_id: unsafe{SERVER_CONFIG.server[i].id},
                 new_data: false,
                 is_running: false,
                 is_connected: false,
@@ -186,6 +228,13 @@ impl ServerManager {
                 ServerCommand::StopAll => {
                     self.stop_all_servers().await;
                 }
+                ServerCommand::AddServer(server_entry) => {
+                    self.add_server(server_entry).await;
+                }
+                ServerCommand::RemoveServer(idx) => {
+                    let _ = self.remove_server(idx).await;
+                    self.sync_with_config().await;
+                }
             }
         }
     }
@@ -196,6 +245,8 @@ impl ServerManager {
             return;
         }
 
+        println!("Starting server {}", server_index);
+
         let shutdown_notify = self.shutdown_notify.clone();
         let tx = self.tx.clone();
         
@@ -204,6 +255,7 @@ impl ServerManager {
             .cloned()
             .unwrap_or(ServerStatusInfo {
                 idx: server_index,
+                server_id: unsafe { SERVER_CONFIG.server[server_index].id },
                 new_data: false,
                 is_running: true,
                 is_connected: false,
@@ -284,6 +336,125 @@ impl ServerManager {
                 _ = tokio::time::sleep(Duration::from_secs(5)) => {
                     log(&format!("Force stopping server {}", idx));
                 }
+            }
+        }
+    }
+
+    pub async fn add_server(&mut self, server_entry: ServerEntry) {
+        // First, add to the global config
+        let new_idx = unsafe {
+            SERVER_CONFIG.server.push(server_entry.clone());
+            SERVER_CONFIG.server.len() - 1
+        };
+
+        // Create a new ServerStatusInfo for this server
+        let new_status = ServerStatusInfo {
+            idx: new_idx,
+            server_id: server_entry.id,
+            new_data: true, // Mark as new data to notify UI
+            is_running: false,
+            is_connected: false,
+            is_alive: false,
+            last_packet_time: 0,
+            peer_ip: [0; 16],
+        };
+
+        // Add the status to our local server_status
+        self.server_status.server.push(new_status);
+
+        // Notify the UI about the new server
+        let _ = self.tx.send(new_status);
+
+        // Save the config to disk
+        /*
+        if let Err(e) = crate::xmlhandling::save_config("config.xml") {
+            log(&format!("Failed to save config after adding server: {}", e));
+        } else {
+            log(&format!("Added new server: {} at {}:{}", 
+                server_entry.name, server_entry.ip_address, server_entry.port));
+        }*/
+    }
+
+    pub async fn remove_server(&mut self, server_index: usize) -> Result<(), &'static str> {
+        // First, stop the server if it's running
+        if self.is_running(server_index) {
+            let _ = self.stop_server(server_index).await;
+        }
+
+        // Remove from global config
+        unsafe {
+            if server_index >= SERVER_CONFIG.server.len() {
+                return Err("Server index out of bounds");
+            }
+            SERVER_CONFIG.server.remove(server_index);
+        }
+
+        // Remove from local status and reindex remaining servers
+        if server_index < self.server_status.server.len() {
+            self.server_status.server.remove(server_index);
+            
+            // Update indices for remaining servers
+            for (i, status) in self.server_status.server.iter_mut().enumerate() {
+                if status.idx > server_index {
+                    status.idx -= 1;
+                    status.new_data = true;
+                    let _ = self.tx.send(*status);
+                }
+            }
+        }
+
+        // Update handles HashMap to reflect new indices
+        let mut new_handles = HashMap::new();
+        for (idx, handle) in self.handles.drain() {
+            if idx > server_index {
+                new_handles.insert(idx - 1, handle);
+            } else if idx < server_index {
+                new_handles.insert(idx, handle);
+            }
+            // Skip the removed server_index
+        }
+        self.handles = new_handles;
+
+        // Save the config
+        /*if let Err(e) = crate::xmlhandling::save_config("config.xml") {
+            log(&format!("Failed to save config after removing server: {}", e));
+        } else {
+            log(&format!("Removed server at index {}", server_index));
+        }*/
+
+        Ok(())
+    }
+
+    // Helper method to get current server count
+    pub fn server_count(&self) -> usize {
+        self.server_status.server.len()
+    }
+
+    // Method to refresh server status from config (useful for synchronization)
+    pub async fn sync_with_config(&mut self) {
+        let config_count = unsafe { SERVER_CONFIG.server.len() };
+        let status_count = self.server_status.server.len();
+
+        if config_count != status_count {
+            log(&format!("Config/Status mismatch: config has {}, status has {}. Syncing...", 
+                config_count, status_count));
+
+            // Clear and rebuild status from config
+            self.server_status.server.clear();
+            
+            for i in 0..config_count {
+                let new_status = ServerStatusInfo {
+                    idx: i,
+                    server_id: unsafe { SERVER_CONFIG.server[i].id },
+                    new_data: true,
+                    is_running: false,
+                    is_connected: false,
+                    is_alive: false,
+                    last_packet_time: 0,
+                    peer_ip: [0; 16],
+                };
+                self.server_status.server.push(new_status);
+                let _ = self.tx.send(new_status);
             }
         }
     }

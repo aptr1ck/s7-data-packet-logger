@@ -1,4 +1,4 @@
-#![windows_subsystem = "windows"]
+//#![windows_subsystem = "windows"]
 
 mod app_config;
 mod comms;
@@ -34,38 +34,42 @@ pub const OS_MOD: Modifiers = if cfg!(target_os = "macos") {
 async fn main() {
     let (status_tx, status_rx) = mpsc::channel::<ServerStatusInfo>();
     let shutdown_notify = Arc::new(Notify::new());
-
+    // Clone for server autostart handling
+    let status_tx_clone = status_tx.clone();
     // Create server manager using the proper constructor
     let (mut server_manager, command_tx) = ServerManager::new(status_tx, shutdown_notify.clone());
-    
-    // Create the command channel for server commands
-    //let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel::<ServerCommand>();
-
-    // Create server manager with the command receiver
-    /*let mut server_manager = ServerManager {
-        handles: HashMap::new(),
-        shutdown_notify: shutdown_notify.clone(),
-        tx: status_tx,
-        command_rx,
-        server_manager,
-    };*/
         
     // Spawn background task to handle server commands
-    let manager_handle = tokio::spawn(async move {
+    let _manager_handle = tokio::spawn(async move {
         server_manager.process_commands().await;
     });
 
     // Start autostart servers if needed
     unsafe {
-        for i in 0..SERVER_CONFIG.server.len() {
-            if SERVER_CONFIG.server[i].autostart {
+        for (idx, server) in SERVER_CONFIG.server.iter_mut().enumerate() {
+            println!("Server ID: {:?}", server.id);
+            // Start server if autostart is enabled
+            if server.autostart {
                 log(&format!("Auto-starting server {}: {}:{}",
-                         i,
-                         SERVER_CONFIG.server[i].ip_address,
-                         SERVER_CONFIG.server[i].port));
+                         idx,
+                         server.ip_address,
+                         server.port));
                 // Send start command through the channel
-                let _ = command_tx.send(ServerCommand::Start(i));
+                let _ = command_tx.send(ServerCommand::Start(idx));
             }
+            // Send initial status for this server
+            let initial_status = ServerStatusInfo {
+                idx,
+                server_id: server.id.clone(),
+                is_running: false,
+                is_connected: false,
+                is_alive: false,
+                peer_ip: [0; 16],
+                last_packet_time: 0,
+                new_data: false,
+            };
+            println!("Sending initial status for server {}: {:?}", idx, initial_status);
+            let _ = status_tx_clone.send(initial_status);
         }
     }
     

@@ -3,3 +3,4 @@ Cargo.lock
 event_data.db
 log.txt
 config - Copy.xml
+log_old.txt

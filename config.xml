@@ -1,8 +1,78 @@
 <ServerConfig>
     <Server>
+        <id>49</id>
+        <id>55</id>
+        <id>53</id>
+        <id>51</id>
+        <id>57</id>
+        <id>51</id>
+        <id>54</id>
+        <id>54</id>
+        <id>57</id>
+        <id>51</id>
+        <id>50</id>
+        <id>55</id>
+        <id>53</id>
+        <id>57</id>
+        <id>54</id>
+        <id>50</id>
+        <id>53</id>
+        <id>48</id>
+        <id>48</id>
+        <id>0</id>
+        <id>0</id>
+        <id>0</id>
+        <id>0</id>
+        <id>0</id>
+        <id>0</id>
+        <id>0</id>
+        <id>0</id>
+        <id>0</id>
+        <id>0</id>
+        <id>0</id>
+        <id>0</id>
+        <id>0</id>
         <name>Edger</name>
         <ip_address>0.0.0.0</ip_address>
         <port>10200</port>
+        <autostart>false</autostart>
+    </Server>
+    <Server>
+        <id>49</id>
+        <id>55</id>
+        <id>53</id>
+        <id>51</id>
+        <id>57</id>
+        <id>51</id>
+        <id>54</id>
+        <id>57</id>
+        <id>55</id>
+        <id>50</id>
+        <id>48</id>
+        <id>57</id>
+        <id>55</id>
+        <id>54</id>
+        <id>52</id>
+        <id>50</id>
+        <id>57</id>
+        <id>48</id>
+        <id>48</id>
+        <id>0</id>
+        <id>0</id>
+        <id>0</id>
+        <id>0</id>
+        <id>0</id>
+        <id>0</id>
+        <id>0</id>
+        <id>0</id>
+        <id>0</id>
+        <id>0</id>
+        <id>0</id>
+        <id>0</id>
+        <id>0</id>
+        <name>Headrig</name>
+        <ip_address>0.0.0.0</ip_address>
+        <port>10100</port>
         <autostart>false</autostart>
     </Server>
 </ServerConfig>
