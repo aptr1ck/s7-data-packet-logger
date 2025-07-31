@@ -137,7 +137,10 @@ pub struct ServerConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerEntry {
-    #[serde(default = "generate_server_id")]
+    #[serde(
+        serialize_with = "crate::xmlhandling::serialize_bytes_as_base64",
+        deserialize_with = "crate::xmlhandling::deserialize_bytes_from_base64"
+    )]
     pub id: [u8; 32], // Unique identifier for each server
     pub name: String,
     pub ip_address: String,
