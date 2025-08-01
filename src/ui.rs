@@ -13,9 +13,11 @@ use floem::{
     keyboard::{Key, NamedKey}, 
     menu::{Menu, MenuItem},
     peniko::Color, prelude::*, 
+    peniko::kurbo::Rect,
     reactive::{create_effect, use_context, provide_context, create_signal, ReadSignal, SignalGet, SignalUpdate, WriteSignal}, 
-    style::{AlignContent, CursorStyle, Position}, 
-    text::Weight, views::{button, container, h_stack, label, scroll, v_stack, Decorators}, 
+    style::{AlignContent, CursorStyle, Position, Style}, 
+    text::Weight, 
+    views::{button, container, h_stack, label, scroll, v_stack, Decorators}, 
     window::{new_window, WindowConfig, WindowId}, 
     IntoView, View, ViewId
 };
@@ -41,10 +43,43 @@ enum Tab {
 impl std::fmt::Display for Tab {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match *self {
-            Tab::Servers => write!(f, "Servers"),
+            Tab::Servers => write!(f, "Connections"),
             Tab::Log => write!(f, "Log"),
         }
     }
+}
+
+fn button_style() -> Style {
+    Style::new()
+        .color(solarized_base01())
+        .background(solarized_base2())
+        .border_color(solarized_base1())
+        .hover(|s| s.background(solarized_base3()).border_color(solarized_base1()))
+        .selected(|s| s.background(solarized_base2()).border_color(solarized_base1()))
+        .focus(|s| s.background(solarized_base2()).border_color(solarized_base1()).hover(|s| s.background(solarized_base3()).border_color(solarized_base1())))
+        .active(|s| s.background(solarized_base1()).border_color(solarized_base2()))
+}
+
+fn input_style() -> Style {
+    Style::new()
+        .color(solarized_base01())
+        .background(solarized_base2())
+        .border_color(solarized_base1())
+        .hover(|s| s.background(solarized_base2()).border_color(solarized_base1()))
+        .focus(|s| s.background(solarized_base3()).border_color(solarized_base1()).hover(|s| s.background(solarized_base3()).border_color(solarized_base1())))
+        .active(|s| s.background(solarized_base3()).border_color(solarized_base1()))
+        .selected(|s| s.background(solarized_base3()).border_color(solarized_base1()))
+}
+
+fn checkbox_style() -> Style {
+    Style::new()
+        .class(CheckboxClass, |s| s.color(solarized_base01())
+            .background(solarized_base2())
+            .border_color(solarized_base1())    
+            .hover(|s| s.background(solarized_base3()).border_color(solarized_base1()))
+            .focus(|s| s.background(solarized_base2()).border_color(solarized_base1()).hover(|s| s.background(solarized_base3()).border_color(solarized_base1())))
+            .active(|s| s.background(solarized_base2()).border_color(solarized_base1()))
+            .selected(|s| s.background(solarized_base2()).border_color(solarized_base1())))
 }
 
 fn tab_button(
@@ -65,7 +100,7 @@ fn tab_button(
             });
         })
         .style(move |s| {
-            s.width(70)
+            s.width(100)
                 .height_full()
                 .items_center()
                 .justify_center()
@@ -161,9 +196,7 @@ fn tab_navigation_view(
             .items_center()
     });
 
-    //let status = status.clone();
-    let main_content = //scroll(
-        //scroll(
+    let main_content = 
             tab(
                 move || active_tab.get(),
                 move || tabs.get(),
@@ -172,18 +205,7 @@ fn tab_navigation_view(
             )
             .style(|s| s.width_full()
                                 .height_full()
-                                .flex_grow(1.0))
-        //)
-        //.style(|s| s.width_full()
-        //                    .flex_col()
-        //                    .flex_grow(1.0)
-        //                    ),
-    /*)
-    .style(|s| {
-        s.items_start()
-            .width_full()
-            .height_full()
-    })*/;
+                                .flex_grow(1.0));
 
     let settings_view = v_stack((tabs_bar, main_content))
         .style(|s| s.width_full()   
@@ -219,7 +241,8 @@ fn server_view(
     let ip_address = RwSignal::new(server.ip_address.clone());
     let port = RwSignal::new(server.port.to_string());
     let server_id = server.id.clone();
-    
+    let autostart = RwSignal::new(server.autostart);
+
     // Clone a bunch of server IDs to avoid move errors.
     let server_id_1 = server_id.clone();
     let server_id_2 = server_id.clone();
@@ -249,7 +272,7 @@ fn server_view(
                     .find(|s| s.matches_server_id(&server_id_1))
                     .map(|s| {
                         if s.peer_ip == [0; 16] {
-                            "x.x.x.x".to_string()
+                            "".to_string()
                         } else {
                             status.get_ip_string(s.idx)
                         }
@@ -337,24 +360,34 @@ fn server_view(
         v_stack((
             h_stack((
                 label(||"IP Address"),
-                text_input(ip_address),
+                text_input(ip_address).style(|_| input_style()),
             )).style(|s| s.justify_end().gap(CONTENT_PADDING).items_center().color(solarized_base01())),
             h_stack((
                 label(||"Port"),
-                text_input(port),
+                text_input(port).style(|_| input_style()),
             )).style(|s| s.justify_end().gap(CONTENT_PADDING).items_center().color(solarized_base01())),
+            h_stack((
+                label(||"Auto start").style(|s| s.color(solarized_base01())),
+                checkbox(move || autostart.get())
+                .style(|_| checkbox_style())
+                .on_update(move |is_checked| {
+                    autostart.set(is_checked);
+                })
+            )).style(|s| s.items_center().gap(CONTENT_PADDING)),
             button("Save")
                 .action(move || {
                     let new_ip = ip_address.get().clone();
                     let new_port = port.get().parse::<u16>().unwrap_or(0);
                     let new_name = name.get().clone();
-                    
+                    let new_autostart = autostart.get();
+
                     unsafe {
                         // Find and update the server by ID
                         if let Some(server) = SERVER_CONFIG.server.iter_mut().find(|s| s.id == server_id_save) {
                             server.ip_address = new_ip.clone();
                             server.port = new_port;
                             server.name = new_name.clone();
+                            server.autostart = new_autostart;
                             
                             if let Err(e) = crate::xmlhandling::save_config("config.xml") {
                                 log(&format!("Failed to save config: {}", e));
@@ -364,30 +397,30 @@ fn server_view(
                             if DEBUG { println!("Saved server {:?}: {}:{}", server_id_save, new_ip, new_port); }
                         }
                     }
-                }).style(|s| s.width(100.0).height(30.0).color(solarized_base01())),
+                }).style(|_| button_style().width(100.0).height(30.0)),
         )).style(|s| s.gap(5.0).items_end()),
         v_stack((
             {
                 button("Start Server").action(move || {
                     let _ = start_command_tx.send(ServerCommand::Start(current_index));
-                }).style(|s| s.height_full().color(solarized_base01()))
+                }).style(|_| button_style().height_full())
             },
             {
                 button("Stop Server").action(move || {
                     let _ = stop_command_tx.send(ServerCommand::Stop(current_index));
-                }).style(|s| s.height_full().color(solarized_base01()))
+                }).style(|_| button_style().height_full())
             },
             {
                 let on_remove = on_remove.clone();
                 button("Remove Server").action(move || {
                     on_remove();
-                }).style(|s| s.height_full().color(solarized_red()))
+                }).style(|_| button_style().height_full().color(solarized_red()))
             },
         )).style(|s| s.gap(5.0)),
     ))
     .style(|s| s.background(solarized_base3())
                         .padding(CONTENT_PADDING)
-                        .gap(BORDER_PADDING)
+                        .gap(CONTENT_PADDING)
                         .width_full()
                         .flex_row())
 }
@@ -402,23 +435,6 @@ fn server_stack(
     let dyn_stack_command_tx = command_tx.clone();
     let remove_command_tx = command_tx.clone();
     
-    // Create an effect to sync server_config_signal with the actual SERVER_CONFIG
-    /*create_effect(move |_| {
-        let _status = status_signal.get();
-        let current_config = unsafe { SERVER_CONFIG.server.clone() };
-        let signal_config = server_config_signal.get();
-        
-        if current_config.len() != signal_config.len() {
-            set_server_config_signal.set(current_config);
-        } else {
-            let configs_different = current_config.iter().zip(signal_config.iter())
-                .any(|(a, b)| a.id != b.id || a.name != b.name || a.ip_address != b.ip_address || a.port != b.port);
-            
-            if configs_different {
-                set_server_config_signal.set(current_config);
-            }
-        }
-    });*/
     // Only sync when the number of servers changes, not on every status update
     create_effect(move |prev_len| {
         let current_config = unsafe { SERVER_CONFIG.server.clone() };
@@ -478,7 +494,7 @@ fn server_stack(
                             ),
         h_stack((
             label(||"").style(|s| s.width_full()), //Spacer
-            button("Add Server")
+            button("Add Connection")
             .action(move || {
                 let new_server = ServerEntry {
                     id: generate_server_id(),
@@ -492,10 +508,18 @@ fn server_stack(
                 set_server_config_signal.update(|config| {
                     config.push(new_server);
                 });
-            }),
+            }).style(|_| button_style().height(30.0)),
             label(||"").style(|s| s.width_full()), //Spacer
-        )),
-        label(||"").style(|s| s.height_full()), // Veritcal Spacer
+        )).style(|s| s.items_start()),
+        canvas(move |cx, size| { // Spacer so that the Add Connection button isn't floating in the middle.
+            cx.fill(
+                &Rect::ZERO
+                    .with_size(size)
+                    .to_rounded_rect(8.),
+                solarized_base2(),
+                0.,
+            );
+        }).style(|s| s.size(100,6000)), // Vertical Spacer
     )).style(|s| s.width_full()
                             .height_full()
                             .padding(BORDER_PADDING)

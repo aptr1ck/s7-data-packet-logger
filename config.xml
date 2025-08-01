@@ -4,6 +4,6 @@
         <name>Edger</name>
         <ip_address>0.0.0.0</ip_address>
         <port>10200</port>
-        <autostart>false</autostart>
+        <autostart>true</autostart>
     </Server>
 </ServerConfig>

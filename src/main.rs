@@ -9,7 +9,7 @@ mod filehandling;
 mod registryhandling;
 mod theme;
 mod utils;
-mod ui_floem;
+mod ui;
 mod xmlhandling;
 
 use floem::{
@@ -21,7 +21,7 @@ use std::sync::{Arc, mpsc, Mutex};
 use std::collections::HashMap;
 use tokio::sync::Notify;
 use crate::comms::*;
-use crate::ui_floem::*;
+use crate::ui::*;
 use crate::utils::log;
 
 pub const OS_MOD: Modifiers = if cfg!(target_os = "macos") {
