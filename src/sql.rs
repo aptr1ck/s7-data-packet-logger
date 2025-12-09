@@ -20,13 +20,13 @@ pub fn connect_to_db() -> Result<Connection> {
     Ok(conn)
 }
 
-pub fn store_packet(conn: &Connection, packet: &EventDataPacket) -> rusqlite::Result<()> {
+pub fn store_packet(conn: &Connection, packet: &EventDataPacket, sender: &String) -> rusqlite::Result<()> {
     let timestamp = chrono::Local::now().to_rfc3339();
     let data_json = serde_json::to_string(&packet.data).unwrap();
 
     conn.execute(
-        "INSERT INTO event_data (timestamp, data_type, plc_packet_code, data) VALUES (?1, ?2, ?3, ?4)",
-        params![timestamp, packet.data_type, packet.plc_packet_code, data_json],
+        "INSERT INTO event_data (plc, timestamp, data_type, plc_packet_code, data) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![sender, timestamp, packet.data_type, packet.plc_packet_code, data_json],
     )?;
     Ok(())
 }

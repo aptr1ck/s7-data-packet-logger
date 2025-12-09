@@ -88,12 +88,12 @@ impl ServerStatus {
     pub fn get_ip_string(&self, i: usize) -> String {
         // Check bounds first
         if i >= self.server.len() {
-            log(&format!("Warning: Requested IP string for server {} but only {} servers exist", i, self.server.len()));
+            if DEBUG {log(&format!("Warning: Requested IP string for server {} but only {} servers exist", i, self.server.len()))};
             return "x.x.x.x".to_string();
         }
 
         // Check if it's IPv4 (first 4 bytes non-zero, rest zero)
-        log(&format!("Getting IP string for server {}: {:?}", i, self.server[i].peer_ip));
+        if DEBUG {log(&format!("Getting IP string for server {}: {:?}", i, self.server[i].peer_ip));}
         if self.server[i].peer_ip[4..].iter().all(|&x| x == 0) {
             let ipv4 = std::net::Ipv4Addr::new(
                 self.server[i].peer_ip[0], 
@@ -102,10 +102,10 @@ impl ServerStatus {
                 self.server[i].peer_ip[3]
             );
             if ipv4.is_unspecified() {
-                log(&format!("Server {} has unspecified IPv4 address, returning x.x.x.x", i));
+                if DEBUG {log(&format!("Server {} has unspecified IPv4 address, returning x.x.x.x", i))};
                 "x.x.x.x".to_string()
             } else {
-                log(&format!("Server {} IPv4 address: {}", i, ipv4));
+                if DEBUG {log(&format!("Server {} IPv4 address: {}", i, ipv4))};
                 ipv4.to_string()
             }
         } else {
@@ -397,7 +397,7 @@ impl ServerManager {
             self.server_status.server.remove(server_index);
             
             // Update indices for remaining servers
-            for (i, status) in self.server_status.server.iter_mut().enumerate() {
+            for (_i, status) in self.server_status.server.iter_mut().enumerate() {
                 if status.idx > server_index {
                     status.idx -= 1;
                     status.new_data = true;
@@ -497,18 +497,21 @@ pub async fn run_server(
         match TcpListener::bind(&address).await {
             Ok(l) => break l, // break with the listener
             Err(e) => {
-                log(&format!("Failed to bind to {}: {}. Retrying in 10 seconds...", address, e));
-                server_status.new_data = true; // Notify UI about the retry
+                log(&format!("Failed to bind to {}: {}. Aborting connection.", address, e));
+                // TODO: Can we stop the server from here?
+                // Removed. Attempt another start in 10 seconds with new data.
+                // Doesn't retry:
+                /*server_status.new_data = true; // Notify UI about the retry
                 tokio::time::sleep(Duration::from_secs(10)).await;
                 // Reload config in case we changed it in the meantime
                 ip_address = config.ip_address.to_string();
                 port = config.port.to_string();
-                address = format!("{}:{}", ip_address, port);
+                address = format!("{}:{}", ip_address, port);*/
             }
         }
     };
     // We don't get here until the listener is successfully connected.
-    if DEBUG { log(&format!("Server listening on {}:{}", ip_address, port)); }
+    log(&format!("Server listening on {}:{}", ip_address, port)); 
   
     loop {
         let mut server_status = server_status; // Clone the server status for each connection
@@ -559,7 +562,7 @@ pub async fn run_server(
                                                     // Check for system packet that we should not store.
                                                     if !is_system_packet(&packet) {
                                                         // Put the data into the database
-                                                        let result = store_packet(&conn, &packet); // TODO: Handle the response properly.
+                                                        let result = store_packet(&conn, &packet, &config.name); // TODO: Handle the response properly.
                                                         if result.is_err() {
                                                             if DEBUG { log(&format!("Error storing packet in database: {:?}", result)); }
                                                             // TODO: Close the connection when we have SQL INSERT errors.
@@ -584,7 +587,7 @@ pub async fn run_server(
                                         }
                                     }
                                     _ = tokio::time::sleep(Duration::from_secs(30)) => {
-                                        if DEBUG { log("No data recevied for 30 seconds.") };
+                                        if DEBUG { log("No data received for 30 seconds.") };
                                         server_status.is_alive = false;
                                         // Notify the UI thread about the status change
                                         server_status.new_data = true;

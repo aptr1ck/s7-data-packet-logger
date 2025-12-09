@@ -1,5 +1,6 @@
 CREATE TABLE event_data (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plc TEXT NOT NULL,
     timestamp TEXT NOT NULL,
     data_type INTEGER NOT NULL,
     plc_packet_code INTEGER NOT NULL,

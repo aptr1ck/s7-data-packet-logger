@@ -1,9 +1,9 @@
 <ServerConfig>
     <Server>
-        <id>MTc1MzkzNzcwNjk0Mjg2MTcwMAAAAAAAAAAAAAAAAAA=</id>
+        <id>MTc2NTIzNzAxMTQyMzAzMjMwMAAAAAAAAAAAAAAAAAA=</id>
         <name>Edger</name>
-        <ip_address>0.0.0.0</ip_address>
-        <port>10200</port>
+        <ip_address>192.168.100.253</ip_address>
+        <port>2000</port>
         <autostart>true</autostart>
     </Server>
 </ServerConfig>
