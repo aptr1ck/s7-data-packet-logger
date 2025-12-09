@@ -12,7 +12,7 @@ use floem::{
     style::FontStyle,
     keyboard::{Key, NamedKey}, 
     menu::{Menu, MenuItem},
-    peniko::Color, prelude::*, 
+    peniko, prelude::*, 
     peniko::kurbo::Rect,
     reactive::{create_effect, use_context, provide_context, create_signal, ReadSignal, SignalGet, SignalUpdate, WriteSignal}, 
     style::{AlignContent, CursorStyle, Position, Style}, 
@@ -21,12 +21,19 @@ use floem::{
     window::{new_window, WindowConfig, WindowId}, 
     IntoView, View, ViewId
 };
+use std::io::Cursor;
+use syntect::highlighting::{
+    /*FontStyle, HighlightIterator,*/ Color as SynColor, HighlightState, Highlighter, RangedHighlightIterator, Theme, ThemeSet
+};
+use syntect::parsing::{ParseState, Scope, ScopeStack, ScopeStackOp, SyntaxReference, SyntaxSet, };
+use syntect_assets::assets::HighlightingAssets;
+use lazy_static::lazy_static;
+use crate::app_config::{/*AppCommand,*/ AppConfig, ThemeNameSig};
 use crate::comms::ServerManager;
 use crate::comms::{ServerEntry, ServerStatus, ServerCommand, generate_server_id};
 use crate::constants::*;
 use crate::filehandling::file_tail;
 use crate::{SERVER_CONFIG, ServerStatusInfo, mpsc::Receiver};
-use crate::theme::*;
 use crate::utils::*;
 
 const LOG_LINES: usize = 500; // Number of lines to show in the log viewer
@@ -49,37 +56,146 @@ impl std::fmt::Display for Tab {
     }
 }
 
+// Build a ThemeSet from the embedded assets
+lazy_static::lazy_static! {
+    pub static ref THEMES: ThemeSet = {
+        let assets = HighlightingAssets::from_binary();
+        let mut ts = ThemeSet::new();    
+
+        // --- Add embedded .tmTheme files here ---
+        // Use absolute path from crate root to be resilient regardless of module location
+        let embedded: &[(&str, &[u8])] = &[
+            // TODO: Monokai, Dracula, Cobalt
+            ( "Default", include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/themes/Default.tmTheme")), ),
+            ( "Everforest Dark", include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/themes/Everforest Dark.tmTheme")), ),
+            ( "Everforest Light", include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/themes/Everforest Light.tmTheme")), ),
+            ( "Fairyfloss", include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/themes/Fairyfloss.tmTheme")), ),
+            ( "Lucky Charms", include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/themes/Lucky Charms.tmTheme")), ),
+            ( "Rosé Pine Dawn", include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/themes/RosePineDawn.tmTheme")), ),
+            ( "Rosé Pine Moon", include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/themes/RosePineMoon.tmTheme")), ),
+            ( "Solarized Dark", include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/themes/SolarizedDark.tmTheme")), ),
+            ( "Solarized Light", include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/themes/SolarizedLight.tmTheme")), ),
+            ( "Zenburn", include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/themes/Zenburn.tmTheme")), ),
+        ];
+
+        for (name, bytes) in embedded {
+            let mut cursor = Cursor::new(*bytes);
+            let theme = ThemeSet::load_from_reader(&mut cursor)
+                .expect("Failed to load embedded .tmTheme");
+            ts.themes.insert((*name).to_string(), theme);
+        }
+        ts
+    };
+}
+
+// Core helper: find the last matching theme rule for a given *stack of scopes*
+// and return (foreground, background) if any. Uses TextMate’s “last rule wins”
+// behavior for ties in specificity.
+fn colors_for_scopes(
+    theme: &Theme,
+    scopes: &[Scope],
+) -> Option<(Option<SynColor>, Option<SynColor>)> {
+    let mut fg: Option<SynColor> = None;
+    let mut bg: Option<SynColor> = None;
+
+    for item in &theme.scopes {
+        if item.scope.does_match(scopes).is_some() {
+            if let Some(c) = item.style.foreground { fg = Some(c); }
+            if let Some(c) = item.style.background { bg = Some(c); }
+        }
+    }
+    if fg.is_some() || bg.is_some() { Some((fg, bg)) } else { None }
+}
+
+// Convenience: build a single-element scope slice from a selector string.
+fn colors_for_scope_selector(
+    theme: &Theme,
+    selector: &str,
+) -> Option<(Option<SynColor>, Option<SynColor>)> {
+    let scope = Scope::new(selector).ok()?;
+    colors_for_scopes(theme, std::slice::from_ref(&scope))
+}
+
+fn get_current_theme() -> &'static Theme {
+    // Try to read the ThemeNameSig from context. If it's not available (for
+    // example during early startup), fall back to the embedded "Default"
+    // theme instead of panicking.
+    if let Some(ThemeNameSig(theme_name_sig)) = use_context::<ThemeNameSig>() {
+        THEMES
+            .themes
+            .get(theme_name_sig.get().as_str())
+            .unwrap_or_else(|| THEMES.themes.get("Default").unwrap())
+    } else {
+        // No theme context provided yet — use Default.
+        THEMES.themes.get("Default").unwrap()
+    }
+}
+
 fn button_style() -> Style {
+    let theme = get_current_theme();
+    let c = colors_for_scope_selector(theme, "ui.selected")
+            .and_then(|(fg, _)| fg)  // prefer a theme-provided background for headings
+            .unwrap_or(syntect::highlighting::Color { r: 128, g: 128, b: 128, a: 40 });
+    let fg = peniko::Color::from_rgba8(c.r, c.g, c.b, c.a);
+    let c = colors_for_scope_selector(theme, "ui.selected")
+            .and_then(|(_, bg)| bg)  // prefer a theme-provided background for headings
+            .unwrap_or(syntect::highlighting::Color { r: 128, g: 128, b: 128, a: 40 });
+    let bg = peniko::Color::from_rgba8(c.r, c.g, c.b, c.a);
+    let c = colors_for_scope_selector(theme, "ui.hover")
+            .and_then(|(_, bg)| bg)  // prefer a theme-provided background for headings
+            .unwrap_or(syntect::highlighting::Color { r: 128, g: 128, b: 128, a: 40 });
+    let abg = peniko::Color::from_rgba8(c.r, c.g, c.b, c.a);
+
     Style::new()
-        .color(solarized_base01())
-        .background(solarized_base2())
-        .border_color(solarized_base1())
-        .hover(|s| s.background(solarized_base3()).border_color(solarized_base1()))
-        .selected(|s| s.background(solarized_base2()).border_color(solarized_base1()))
-        .focus(|s| s.background(solarized_base2()).border_color(solarized_base1()).hover(|s| s.background(solarized_base3()).border_color(solarized_base1())))
-        .active(|s| s.background(solarized_base1()).border_color(solarized_base2()))
+        .color(fg)
+        .background(bg)
+        .border_color(fg)
+        .hover(|s| s.background(bg).border_color(fg).hover(|s| s.background(abg).border_color(fg)))
+        .focus(|s| s.background(abg).border_color(fg).hover(|s| s.background(abg).border_color(fg)))
+        .active(|s| s.background(abg).border_color(fg).hover(|s| s.background(abg).border_color(fg)))
+        .selected(|s| s.background(abg).border_color(fg).hover(|s| s.background(abg).border_color(fg)))
 }
 
 fn input_style() -> Style {
+    let theme = get_current_theme();
+    let c = theme.settings.foreground.unwrap_or(syntect::highlighting::Color::BLACK);
+    let fg = peniko::Color::from_rgba8(c.r, c.g, c.b, c.a);
+    let c = colors_for_scope_selector(theme, "ui.sidebar")
+            .and_then(|(_, bg)| bg)  // prefer a theme-provided background for headings
+            .unwrap_or(syntect::highlighting::Color { r: 128, g: 128, b: 128, a: 40 });
+    let bg = peniko::Color::from_rgba8(c.r, c.g, c.b, c.a);
+    let active_colour = theme.settings.background.unwrap_or(syntect::highlighting::Color::WHITE);
+    let ac = peniko::Color::from_rgba8(active_colour.r, active_colour.g, active_colour.b, active_colour.a);
+
     Style::new()
-        .color(solarized_base01())
-        .background(solarized_base2())
-        .border_color(solarized_base1())
-        .hover(|s| s.background(solarized_base2()).border_color(solarized_base1()))
-        .focus(|s| s.background(solarized_base3()).border_color(solarized_base1()).hover(|s| s.background(solarized_base3()).border_color(solarized_base1())))
-        .active(|s| s.background(solarized_base3()).border_color(solarized_base1()))
-        .selected(|s| s.background(solarized_base3()).border_color(solarized_base1()))
+        .color(fg)
+        .background(ac)
+        .border_color(fg)
+        .hover(|s| s.background(ac).border_color(fg))
+        .selected(|s| s.background(ac).border_color(fg))
+        .focus(|s| s.background(ac).border_color(fg).hover(|s| s.background(ac).border_color(fg)))
+        .active(|s| s.background(ac).border_color(fg))
 }
 
 fn checkbox_style() -> Style {
+    let theme = get_current_theme();
+    let c = theme.settings.foreground.unwrap_or(syntect::highlighting::Color::BLACK);
+    let fg = peniko::Color::from_rgba8(c.r, c.g, c.b, c.a);
+    let c = colors_for_scope_selector(theme, "ui.sidebar")
+            .and_then(|(_, bg)| bg)  // prefer a theme-provided background for headings
+            .unwrap_or(syntect::highlighting::Color { r: 128, g: 128, b: 128, a: 40 });
+    let bg = peniko::Color::from_rgba8(c.r, c.g, c.b, c.a);
+    let active_colour = theme.settings.background.unwrap_or(syntect::highlighting::Color::WHITE);
+    let ac = peniko::Color::from_rgba8(active_colour.r, active_colour.g, active_colour.b, active_colour.a);
+
     Style::new()
-        .class(CheckboxClass, |s| s.color(solarized_base01())
-            .background(solarized_base2())
-            .border_color(solarized_base1())    
-            .hover(|s| s.background(solarized_base3()).border_color(solarized_base1()))
-            .focus(|s| s.background(solarized_base2()).border_color(solarized_base1()).hover(|s| s.background(solarized_base3()).border_color(solarized_base1())))
-            .active(|s| s.background(solarized_base2()).border_color(solarized_base1()))
-            .selected(|s| s.background(solarized_base2()).border_color(solarized_base1())))
+        .color(fg)
+        .background(bg)
+        .border_color(fg)
+        .hover(|s| s.background(bg).border_color(fg))
+        .selected(|s| s.background(bg).border_color(fg))
+        .focus(|s| s.background(ac).border_color(fg).hover(|s| s.background(ac).border_color(fg)))
+        .active(|s| s.background(ac).border_color(fg))
 }
 
 fn tab_button(
@@ -88,6 +204,17 @@ fn tab_button(
     set_active_tab: WriteSignal<usize>,
     active_tab: ReadSignal<usize>,
 ) -> impl IntoView {
+    let theme = get_current_theme();
+    let c = theme.settings.foreground.unwrap_or(syntect::highlighting::Color::BLACK);
+    let fg = peniko::Color::from_rgba8(c.r, c.g, c.b, c.a);
+    let c = colors_for_scope_selector(theme, "ui.sidebar")
+            .and_then(|(_, bg)| bg)  // prefer a theme-provided background for headings
+            .unwrap_or(syntect::highlighting::Color { r: 128, g: 128, b: 128, a: 40 });
+    let bg = peniko::Color::from_rgba8(c.r, c.g, c.b, c.a);
+    let c = colors_for_scope_selector(theme, "ui.hover")
+            .and_then(|(_, bg)| bg)  // prefer a theme-provided background for headings
+            .unwrap_or(syntect::highlighting::Color { r: 128, g: 128, b: 128, a: 40 });
+    let abg = peniko::Color::from_rgba8(c.r, c.g, c.b, c.a);
     label(move || this_tab)
         .keyboard_navigable()
         .on_click_stop(move |_| {
@@ -104,9 +231,9 @@ fn tab_button(
                 .height_full()
                 .items_center()
                 .justify_center()
-                .color(solarized_base00())
-                .background(solarized_base1_8())
-                .hover(|s| s.font_weight(Weight::BOLD).color(solarized_base02()).cursor(CursorStyle::Pointer))
+                .color(fg)
+                .background(bg)
+                .hover(|s| s.font_weight(Weight::BOLD).color(fg).cursor(CursorStyle::Pointer))
                 .apply_if(
                     active_tab.get()
                         == tabs
@@ -114,7 +241,7 @@ fn tab_button(
                             .iter()
                             .position(|it| *it == this_tab)
                             .unwrap(),
-                    |s| s.font_weight(Weight::BOLD).color(solarized_base01()).background(solarized_base2()),
+                    |s| s.font_weight(Weight::BOLD).color(fg).background(abg),
                 )
         })
 }
@@ -133,7 +260,15 @@ fn tab_content(
 
 fn log_view(status_signal: ReadSignal<ServerStatus>) -> impl IntoView {
     let (log_lines_signal, set_log_lines_signal) = create_signal(Vector::<String>::new());
-    
+    // Setup colours
+    let theme = get_current_theme();
+    let c = theme.settings.foreground.unwrap_or(syntect::highlighting::Color::BLACK);
+    let fg = peniko::Color::from_rgba8(c.r, c.g, c.b, c.a);
+    let c = colors_for_scope_selector(theme, "ui.hover")
+            .and_then(|(_, bg)| bg)  // prefer a theme-provided background for headings
+            .unwrap_or(syntect::highlighting::Color { r: 128, g: 128, b: 128, a: 40 });
+    let bg = peniko::Color::from_rgba8(c.r, c.g, c.b, c.a);
+    // Create an effect to update the log
     create_effect(move |_| {
         let _status = status_signal.get();
         
@@ -146,25 +281,25 @@ fn log_view(status_signal: ReadSignal<ServerStatus>) -> impl IntoView {
 
     scroll(
         VirtualStack::new(move || log_lines_signal.get())
-            .style(|s| {
+            .style(move |s| {
                 s.flex_col()
                     .width_full()
                     .class(LabelClass, |s| {
                         s.width_full()
                             .font_family("monospace".to_string()) 
                             .font_size(13.0)
-                            .color(solarized_base01())
-                            .background(solarized_base3())
+                            .color(fg)
+                            .background(bg)
                             .padding_horiz(CONTENT_PADDING/(2 as f64))
                             .padding_vert(1.0)
                     })
             })
     )
-    .style(|s| {
+    .style(move |s| {
         s.width_full()
             .height_full()
             .padding(CONTENT_PADDING/(2 as f64))
-            .background(solarized_base2())
+            .background(bg)
     })
 }
 
@@ -178,6 +313,13 @@ fn tab_navigation_view(
     let (tabs, _set_tabs) = create_signal(tabs);
     let (active_tab, set_active_tab) = create_signal(0);
 
+    // Setup colours
+    let theme = get_current_theme();
+    let c = colors_for_scope_selector(theme, "ui.sidebar")
+            .and_then(|(_, bg)| bg)  // prefer a theme-provided background for headings
+            .unwrap_or(syntect::highlighting::Color { r: 128, g: 128, b: 128, a: 40 });
+    let bg = peniko::Color::from_rgba8(c.r, c.g, c.b, c.a);
+
     // Create the server config signals
     let (server_config_signal, set_server_config_signal) = create_server_config_signal();
 
@@ -185,14 +327,14 @@ fn tab_navigation_view(
         tab_button(Tab::Servers, tabs, set_active_tab, active_tab),
         tab_button(Tab::Log, tabs, set_active_tab, active_tab),
     ))
-    .style(|s| {
+    .style(move |s| {
         s.flex_row()
             .width_full()
             .height(TABBAR_HEIGHT)
             .min_height(TABBAR_HEIGHT)
             .col_gap(2)
             //.padding_left(CONTENT_PADDING as i32)
-            .background(solarized_base1_9())
+            .background(bg)
             .items_center()
     });
 
@@ -256,12 +398,29 @@ fn server_view(
     let start_command_tx = command_tx.clone();
     let stop_command_tx = command_tx.clone();
 
+    // Setup colours
+    let theme = get_current_theme();
+    let c = theme.settings.foreground.unwrap_or(syntect::highlighting::Color::BLACK);
+    let fg = peniko::Color::from_rgba8(c.r, c.g, c.b, c.a);
+    let c = colors_for_scope_selector(theme, "ui.selected")
+            .and_then(|(_, bg)| bg)  // prefer a theme-provided background for headings
+            .unwrap_or(syntect::highlighting::Color { r: 128, g: 128, b: 128, a: 40 });
+    let bg = peniko::Color::from_rgba8(c.r, c.g, c.b, c.a);
+    let c = colors_for_scope_selector(theme, "green")
+            .and_then(|(fg, _)| fg)  // prefer a theme-provided background for headings
+            .unwrap_or(syntect::highlighting::Color { r: 128, g: 128, b: 128, a: 40 });
+    let green = peniko::Color::from_rgba8(c.r, c.g, c.b, c.a);
+    let c = colors_for_scope_selector(theme, "red")
+            .and_then(|(fg, _)| fg)  // prefer a theme-provided background for headings
+            .unwrap_or(syntect::highlighting::Color { r: 128, g: 128, b: 128, a: 40 });
+    let red = peniko::Color::from_rgba8(c.r, c.g, c.b, c.a);
+
     h_stack((
         // Basic server info
         v_stack((
-            text_input(name).style(|s| s.font_size(20.0)
+            text_input(name).style(move |s| s.font_size(20.0)
                                                         .background(Color::TRANSPARENT)
-                                                        .color(solarized_base01())
+                                                        .color(fg)
                                                         .hover(|s| s.background(Color::TRANSPARENT))
                                                         .padding(0.0)
                                                         .border(0.0)),
@@ -278,7 +437,7 @@ fn server_view(
                         }
                     })
                     .unwrap_or_else(|| "b.o.r.k".to_string())
-            }).style(|s| s.font_size(12.0).color(solarized_base01())),
+            }).style(move |s| s.font_size(12.0).color(fg)),
             label(move || "").style(|s| s.font_size(6.0).flex_grow(1.0)), // Spacer
             label(move || {
                 let server_id = server_id.clone();
@@ -295,9 +454,9 @@ fn server_view(
                         }
                     })
                     .unwrap_or_else(|| "No server data".to_string())
-            }).style(|s| s.font_size(12.0)
+            }).style(move |s| s.font_size(12.0)
                                     .font_style(floem::text::Style::Italic)
-                                    .color(solarized_base1())
+                                    .color(fg)
                                 ),
             h_stack((
                 label(move || {
@@ -315,8 +474,8 @@ fn server_view(
                         .find(|s| s.matches_server_id(&server_id))
                         .map(|s| s.is_running)
                         .unwrap_or(false);
-                    s.color(if is_running { solarized_green() } else { solarized_red() })
-                        .background(solarized_base2())
+                    s.color(if is_running { green } else { red })
+                        .background(bg)
                         .border_radius(5.0)
                         .padding(5.0)
                 }),
@@ -332,8 +491,8 @@ fn server_view(
                         .find(|s| s.matches_server_id(&server_id))
                         .map(|s| s.is_connected)
                         .unwrap_or(false);
-                    s.color(if is_connected { solarized_green() } else { solarized_base0() })
-                        .background(solarized_base2())
+                    s.color(if is_connected { green } else { red })
+                        .background(bg)
                         .border_radius(5.0)
                         .padding(5.0)
                 }),
@@ -349,8 +508,8 @@ fn server_view(
                         .find(|s| s.matches_server_id(&server_id))
                         .map(|s| s.is_alive)
                         .unwrap_or(false);
-                    s.color(if is_alive { solarized_green() } else { solarized_base0() })
-                        .background(solarized_base2())
+                    s.color(if is_alive { green } else { red })
+                        .background(bg)
                         .border_radius(5.0)
                         .padding(5.0)
                 }),
@@ -359,15 +518,15 @@ fn server_view(
         // Input fields for IP and Port
         v_stack((
             h_stack((
-                label(||"IP Address"),
+                label(||"Local IP Address on PLC Network"),
                 text_input(ip_address).style(|_| input_style()),
-            )).style(|s| s.justify_end().gap(CONTENT_PADDING).items_center().color(solarized_base01())),
+            )).style(move |s| s.justify_end().gap(CONTENT_PADDING).items_center().color(fg)),
             h_stack((
                 label(||"Port"),
                 text_input(port).style(|_| input_style()),
-            )).style(|s| s.justify_end().gap(CONTENT_PADDING).items_center().color(solarized_base01())),
+            )).style(move |s| s.justify_end().gap(CONTENT_PADDING).items_center().color(fg)),
             h_stack((
-                label(||"Auto start").style(|s| s.color(solarized_base01())),
+                label(||"Auto start").style(move |s| s.color(fg)),
                 checkbox(move || autostart.get())
                 .style(|_| checkbox_style())
                 .on_update(move |is_checked| {
@@ -414,11 +573,11 @@ fn server_view(
                 let on_remove = on_remove.clone();
                 button("Remove Server").action(move || {
                     on_remove();
-                }).style(|_| button_style().height_full().color(solarized_red()))
+                }).style(move |_| button_style().height_full().color(fg))
             },
         )).style(|s| s.gap(5.0)),
     ))
-    .style(|s| s.background(solarized_base3())
+    .style(move |s| s.background(bg)
                         .padding(CONTENT_PADDING)
                         .gap(CONTENT_PADDING)
                         .width_full()
@@ -435,6 +594,17 @@ fn server_stack(
     let dyn_stack_command_tx = command_tx.clone();
     let remove_command_tx = command_tx.clone();
     
+    // Setup colours
+    let theme = get_current_theme();
+    let c = colors_for_scope_selector(theme, "ui.hover")
+            .and_then(|(_, bg)| bg)  // prefer a theme-provided background for headings
+            .unwrap_or(syntect::highlighting::Color { r: 128, g: 128, b: 128, a: 40 });
+    let bg = peniko::Color::from_rgba8(c.r, c.g, c.b, c.a);
+    let c = colors_for_scope_selector(theme, "ui.selected")
+            .and_then(|(_, bg)| bg)  // prefer a theme-provided background for headings
+            .unwrap_or(syntect::highlighting::Color { r: 128, g: 128, b: 128, a: 40 });
+    let abg = peniko::Color::from_rgba8(c.r, c.g, c.b, c.a);
+
     // Only sync when the number of servers changes, not on every status update
     create_effect(move |prev_len| {
         let current_config = unsafe { SERVER_CONFIG.server.clone() };
@@ -484,7 +654,7 @@ fn server_stack(
                         }
                     }
                 )
-                .style(|s| s.background(solarized_base3()))
+                .style(move |s| s.background(abg))
             }
         ).style(|s| s.flex_col()
                             .width_full()
@@ -516,14 +686,15 @@ fn server_stack(
                 &Rect::ZERO
                     .with_size(size)
                     .to_rounded_rect(8.),
-                solarized_base2(),
+                bg,
                 0.,
             );
         }).style(|s| s.size(100,6000)), // Vertical Spacer
-    )).style(|s| s.width_full()
+    )).style(move |s| s.width_full()
                             .height_full()
                             .padding(BORDER_PADDING)
-                            .gap(CONTENT_PADDING))
+                            .gap(CONTENT_PADDING)
+                            .background(bg))
 }
 
 // Create a signal for the server configuration (for reactive UI)
@@ -540,6 +711,15 @@ pub fn app_view(rx: Receiver<ServerStatusInfo>, command_tx: tokio::sync::mpsc::U
     // Convert rx to Arc<Mutex<>> so we can share it between contexts
     let rx = std::sync::Arc::new(std::sync::Mutex::new(rx));
     let rx_clone = rx.clone();
+
+    // Setup colours
+    let theme = get_current_theme();
+    let c = theme.settings.foreground.unwrap_or(syntect::highlighting::Color::BLACK);
+    let fg = peniko::Color::from_rgba8(c.r, c.g, c.b, c.a);
+    let c = colors_for_scope_selector(theme, "ui.sidebar")
+            .and_then(|(_, bg)| bg)  // prefer a theme-provided background for headings
+            .unwrap_or(syntect::highlighting::Color { r: 128, g: 128, b: 128, a: 40 });
+    let bg = peniko::Color::from_rgba8(c.r, c.g, c.b, c.a);
 
     // Create a simple polling function
     fn schedule_poll(
@@ -603,10 +783,10 @@ pub fn app_view(rx: Receiver<ServerStatusInfo>, command_tx: tokio::sync::mpsc::U
         tab_navigation_view(status_signal, command_tx),
         //server_stack,
     ))
-    .style(|s| s.width_full()
+    .style(move |s| s.width_full()
                         .height_full()
                         .flex_col()
-                        .background(solarized_base2())
+                        .background(bg)
                     );
 
     let id = view.id();

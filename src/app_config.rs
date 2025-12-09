@@ -14,6 +14,10 @@ use serde::{Deserialize, Serialize};
 use crate::constants::*;
 use crate::OS_MOD;
 
+// Theme name signal type for providing context
+#[derive(Clone, Copy)]
+pub struct ThemeNameSig(pub RwSignal<String>);
+
 #[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum AppTheme {
     FollowSystem,

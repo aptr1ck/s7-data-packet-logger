@@ -7,7 +7,6 @@ mod sql;
 mod event_data;
 mod filehandling;
 mod registryhandling;
-mod theme;
 mod utils;
 mod ui;
 mod xmlhandling;
