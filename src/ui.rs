@@ -10,8 +10,7 @@ use floem::{
     action::exec_after,
     event::{Event, EventListener}, 
     style::FontStyle,
-    keyboard::{Key, NamedKey}, 
-    menu::{Menu, MenuItem},
+    menu::{Menu},
     peniko, prelude::*, 
     peniko::kurbo::Rect,
     reactive::{create_effect, use_context, provide_context, create_signal, ReadSignal, SignalGet, SignalUpdate, WriteSignal}, 
@@ -160,10 +159,10 @@ fn input_style() -> Style {
     let theme = get_current_theme();
     let c = theme.settings.foreground.unwrap_or(syntect::highlighting::Color::BLACK);
     let fg = peniko::Color::from_rgba8(c.r, c.g, c.b, c.a);
-    let c = colors_for_scope_selector(theme, "ui.sidebar")
+    /*let c = colors_for_scope_selector(theme, "ui.sidebar")
             .and_then(|(_, bg)| bg)  // prefer a theme-provided background for headings
             .unwrap_or(syntect::highlighting::Color { r: 128, g: 128, b: 128, a: 40 });
-    let bg = peniko::Color::from_rgba8(c.r, c.g, c.b, c.a);
+    let bg = peniko::Color::from_rgba8(c.r, c.g, c.b, c.a);*/
     let active_colour = theme.settings.background.unwrap_or(syntect::highlighting::Color::WHITE);
     let ac = peniko::Color::from_rgba8(active_colour.r, active_colour.g, active_colour.b, active_colour.a);
 
@@ -259,7 +258,7 @@ fn tab_content(
 }
 
 fn log_view(status_signal: ReadSignal<ServerStatus>) -> impl IntoView {
-    let (log_lines_signal, set_log_lines_signal) = create_signal(Vector::<String>::new());
+    let (log_lines_signal, set_log_lines_signal) = create_signal(Vec::<String>::new());
     // Setup colours
     let theme = get_current_theme();
     let c = theme.settings.foreground.unwrap_or(syntect::highlighting::Color::BLACK);
@@ -275,12 +274,12 @@ fn log_view(status_signal: ReadSignal<ServerStatus>) -> impl IntoView {
         let log_content = file_tail("log.txt", LOG_LINES)
             .unwrap_or_else(|_| String::from("Failed to read log file."));
         
-        let lines: Vector<String> = log_content.lines().map(|l| l.to_string()).collect();
+        let lines: Vec<String> = log_content.lines().map(|l| l.to_string()).collect();
         set_log_lines_signal.set(lines);
     });
 
     scroll(
-        VirtualStack::new(move || log_lines_signal.get())
+        VirtualStack::new(move || log_lines_signal)
             .style(move |s| {
                 s.flex_col()
                     .width_full()
@@ -340,7 +339,7 @@ fn tab_navigation_view(
 
     let main_content = 
             tab(
-                move || active_tab.get(),
+                move || Some(active_tab.get()),
                 move || tabs.get(),
                 |it| *it,
                 move |it| tab_content(it, status_signal, command_tx.clone(), server_config_signal, set_server_config_signal).style(|s| s.width_full().height_full()),
@@ -360,7 +359,8 @@ fn tab_navigation_view(
 fn window_menu(
     //view_id: WindowId,
 ) -> Menu {
-    Menu::new(APPNAME)
+    let mut menu = Menu::new();
+/*     Menu::new(APPNAME)
         .entry({
             Menu::new("File")
                 .entry(MenuItem::new("Exit").action(move || {
@@ -368,7 +368,8 @@ fn window_menu(
                     //floem::close_window(view_id);
                     floem::quit_app();
                 }))
-            })
+            })*/
+    menu
 }
 
 fn server_view(
@@ -414,6 +415,13 @@ fn server_view(
             .and_then(|(fg, _)| fg)  // prefer a theme-provided background for headings
             .unwrap_or(syntect::highlighting::Color { r: 128, g: 128, b: 128, a: 40 });
     let red = peniko::Color::from_rgba8(c.r, c.g, c.b, c.a);
+
+    // Get an approximate width for the IP address input
+    let sample = "255.255.255.255";
+    let font_size = 13.0;
+    // factor 0.6 is a reasonable approximation of average glyph width / font_size
+    let approx_char_width = font_size * 0.6;
+    let min_ip_width = (sample.len() as f64) * approx_char_width;
 
     h_stack((
         // Basic server info
@@ -519,11 +527,11 @@ fn server_view(
         v_stack((
             h_stack((
                 label(||"Local IP Address on PLC Network"),
-                text_input(ip_address).style(|_| input_style()),
+                text_input(ip_address).style(move |_| input_style().min_width(min_ip_width)),
             )).style(move |s| s.justify_end().gap(CONTENT_PADDING).items_center().color(fg)),
             h_stack((
                 label(||"Port"),
-                text_input(port).style(|_| input_style()),
+                text_input(port).style(move |_| input_style().min_width(min_ip_width)),
             )).style(move |s| s.justify_end().gap(CONTENT_PADDING).items_center().color(fg)),
             h_stack((
                 label(||"Auto start").style(move |s| s.color(fg)),
@@ -793,8 +801,14 @@ pub fn app_view(rx: Receiver<ServerStatusInfo>, command_tx: tokio::sync::mpsc::U
     //let window_id = 0 as WindowId;//floem::window::WindowContext;
     
     view.on_event_stop(EventListener::KeyUp, move |e| {
-        if let Event::KeyUp(e) = e {
-            if e.key.logical_key == Key::Named(NamedKey::F11) {
+        if let Event::Key(KeyboardEvent {
+            state: KeyState::Up,
+            code,
+            key,
+            ..
+        }) = e 
+        {
+            if *key == Key::Named(NamedKey::F11) {
                 id.inspect();
             }
         }

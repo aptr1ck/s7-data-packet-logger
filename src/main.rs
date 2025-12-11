@@ -13,7 +13,6 @@ mod xmlhandling;
 
 use floem::{
     action::{exec_after, inspect},
-    keyboard::{Key, Modifiers, NamedKey},
     prelude::*,
 };
 use std::sync::{Arc, mpsc, Mutex};

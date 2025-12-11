@@ -1,5 +1,4 @@
 use floem::action::set_window_scale;
-use floem::keyboard::Key;
 use floem::reactive::provide_context;
 use floem::views::Decorators;
 use floem::{
@@ -83,36 +82,6 @@ pub fn launch_with_track<V: IntoView + 'static>(app_view: impl FnOnce() -> V + '
         move |_| {
             set_window_scale(app_config.with(|c| c.window_scale));
             app_view()
-                .on_key_down(
-                    Key::Character("=".into()),
-                    |m| m == OS_MOD,
-                    move |_| {
-                        app_config.update(|ac| {
-                            ac.window_scale *= 1.1;
-                            floem::action::set_window_scale(ac.window_scale);
-                        });
-                    },
-                )
-                .on_key_down(
-                    Key::Character("-".into()),
-                    |m| m == OS_MOD,
-                    move |_| {
-                        app_config.update(|ac| {
-                            ac.window_scale /= 1.1;
-                            floem::action::set_window_scale(ac.window_scale);
-                        });
-                    },
-                )
-                .on_key_down(
-                    Key::Character("0".into()),
-                    |m| m == OS_MOD,
-                    move |_| {
-                        app_config.update(|ac| {
-                            ac.window_scale = 1.;
-                            floem::action::set_window_scale(ac.window_scale);
-                        });
-                    },
-                )
                 .on_event_stop(EventListener::WindowMoved, move |event| {
                     if let Event::WindowMoved(position) = event {
                         app_config.update(|val| {
