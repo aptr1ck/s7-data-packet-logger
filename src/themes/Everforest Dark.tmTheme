@@ -3306,6 +3306,17 @@
 				<string>#859289D1</string>
 			</dict>
 		</dict>
+		<dict>
+			<key>name</key>
+			<string>Sidebar Hover</string>
+			<key>scope</key>
+			<string>ui.hover</string>
+			<key>settings</key>
+			<dict>
+				<key>background</key>
+				<string>#5F696F</string>
+			</dict>
+		</dict>
 	</array>
 	<key>uuid</key>
 	<string>3f688e48-bd62-4cd7-9981-9b491786d8c6</string>

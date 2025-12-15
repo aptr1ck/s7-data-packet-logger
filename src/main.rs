@@ -11,12 +11,8 @@ mod utils;
 mod ui;
 mod xmlhandling;
 
-use floem::{
-    action::{exec_after, inspect},
-    prelude::*,
-};
-use std::sync::{Arc, mpsc, Mutex};
-use std::collections::HashMap;
+use floem::prelude::*;
+use std::sync::{Arc, mpsc};
 use tokio::sync::Notify;
 use crate::comms::*;
 use crate::ui::*;

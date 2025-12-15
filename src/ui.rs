@@ -7,13 +7,13 @@ use chrono::Local;
 use chrono::TimeZone;
 use im::Vector;
 use floem::{
-    action::exec_after,
+    action::{exec_after, set_window_menu},
     event::{Event, EventListener}, 
     style::FontStyle,
-    menu::{Menu},
+    menu::{Menu, SubMenu},
     peniko, prelude::*, 
     peniko::kurbo::Rect,
-    reactive::{create_effect, use_context, provide_context, create_signal, ReadSignal, SignalGet, SignalUpdate, WriteSignal}, 
+    reactive::{UpdaterEffect, use_context, provide_context, create_signal, ReadSignal, SignalGet, SignalUpdate, WriteSignal}, 
     style::{AlignContent, CursorStyle, Position, Style}, 
     text::Weight, 
     views::{button, container, h_stack, label, scroll, v_stack, Decorators}, 
@@ -203,7 +203,17 @@ fn tab_button(
     set_active_tab: WriteSignal<usize>,
     active_tab: ReadSignal<usize>,
 ) -> impl IntoView {
-    let theme = get_current_theme();
+    let theme = {//get_current_theme();
+        if let Some(ThemeNameSig(theme_name_sig)) = use_context::<ThemeNameSig>() {
+            THEMES
+                .themes
+                .get(theme_name_sig.get().as_str())
+                .unwrap_or_else(|| THEMES.themes.get("Default").unwrap())
+        } else {
+            // No theme context provided yet — use Default.
+            THEMES.themes.get("Default").unwrap()
+        }
+    };
     let c = theme.settings.foreground.unwrap_or(syntect::highlighting::Color::BLACK);
     let fg = peniko::Color::from_rgba8(c.r, c.g, c.b, c.a);
     let c = colors_for_scope_selector(theme, "ui.sidebar")
@@ -259,7 +269,7 @@ fn tab_content(
 
 fn log_view(status_signal: ReadSignal<ServerStatus>) -> impl IntoView {
     let (log_lines_signal, set_log_lines_signal) = create_signal(Vec::<String>::new());
-    // Setup colours
+    // Use the theme signal so closures can re-evaluate when theme changes
     let theme = get_current_theme();
     let c = theme.settings.foreground.unwrap_or(syntect::highlighting::Color::BLACK);
     let fg = peniko::Color::from_rgba8(c.r, c.g, c.b, c.a);
@@ -268,15 +278,15 @@ fn log_view(status_signal: ReadSignal<ServerStatus>) -> impl IntoView {
             .unwrap_or(syntect::highlighting::Color { r: 128, g: 128, b: 128, a: 40 });
     let bg = peniko::Color::from_rgba8(c.r, c.g, c.b, c.a);
     // Create an effect to update the log
-    create_effect(move |_| {
-        let _status = status_signal.get();
-        
-        let log_content = file_tail("log.txt", LOG_LINES)
-            .unwrap_or_else(|_| String::from("Failed to read log file."));
-        
-        let lines: Vec<String> = log_content.lines().map(|l| l.to_string()).collect();
-        set_log_lines_signal.set(lines);
-    });
+    UpdaterEffect::new(
+        move || status_signal.get(),
+        move |_status_signal| {
+            let log_content = file_tail("log.txt", LOG_LINES)
+                .unwrap_or_else(|_| String::from("Failed to read log file."));
+            let lines: Vec<String> = log_content.lines().map(|l| l.to_string()).collect();
+            set_log_lines_signal.set(lines);
+        },
+    );
 
     scroll(
         VirtualStack::new(move || log_lines_signal)
@@ -312,8 +322,13 @@ fn tab_navigation_view(
     let (tabs, _set_tabs) = create_signal(tabs);
     let (active_tab, set_active_tab) = create_signal(0);
 
+    // Use the theme signal so closures can re-evaluate when theme changes
+    let ThemeNameSig(theme_name_sig) = use_context::<ThemeNameSig>().expect("ThemeNameSig not found");
     // Setup colours
-    let theme = get_current_theme();
+    let theme = THEMES
+                .themes
+                .get(theme_name_sig.get().as_str())
+                .unwrap_or_else(|| THEMES.themes.get("Default").unwrap());
     let c = colors_for_scope_selector(theme, "ui.sidebar")
             .and_then(|(_, bg)| bg)  // prefer a theme-provided background for headings
             .unwrap_or(syntect::highlighting::Color { r: 128, g: 128, b: 128, a: 40 });
@@ -356,22 +371,6 @@ fn tab_navigation_view(
     settings_view
 }
 
-fn window_menu(
-    //view_id: WindowId,
-) -> Menu {
-    let mut menu = Menu::new();
-/*     Menu::new(APPNAME)
-        .entry({
-            Menu::new("File")
-                .entry(MenuItem::new("Exit").action(move || {
-                    //workbench_command.send(WorkBenchCommand::CloseWindow);
-                    //floem::close_window(view_id);
-                    floem::quit_app();
-                }))
-            })*/
-    menu
-}
-
 fn server_view(
     server: ServerEntry,
     current_index: usize,
@@ -399,8 +398,13 @@ fn server_view(
     let start_command_tx = command_tx.clone();
     let stop_command_tx = command_tx.clone();
 
+    // Use the theme signal so closures can re-evaluate when theme changes
+    let ThemeNameSig(theme_name_sig) = use_context::<ThemeNameSig>().expect("ThemeNameSig not found");
     // Setup colours
-    let theme = get_current_theme();
+    let theme = THEMES
+                .themes
+                .get(theme_name_sig.get().as_str())
+                .unwrap_or_else(|| THEMES.themes.get("Default").unwrap());
     let c = theme.settings.foreground.unwrap_or(syntect::highlighting::Color::BLACK);
     let fg = peniko::Color::from_rgba8(c.r, c.g, c.b, c.a);
     let c = colors_for_scope_selector(theme, "ui.selected")
@@ -602,7 +606,7 @@ fn server_stack(
     let dyn_stack_command_tx = command_tx.clone();
     let remove_command_tx = command_tx.clone();
     
-    // Setup colours
+    // Use the theme signal so closures can re-evaluate when theme changes
     let theme = get_current_theme();
     let c = colors_for_scope_selector(theme, "ui.hover")
             .and_then(|(_, bg)| bg)  // prefer a theme-provided background for headings
@@ -614,7 +618,13 @@ fn server_stack(
     let abg = peniko::Color::from_rgba8(c.r, c.g, c.b, c.a);
 
     // Only sync when the number of servers changes, not on every status update
-    create_effect(move |prev_len| {
+    UpdaterEffect::new(
+        move || (unsafe {SERVER_CONFIG.server.clone()}),
+        move |current_config| {
+            set_server_config_signal.set(current_config);
+        },
+    );
+    /*create_effect(move |prev_len| {
         let current_config = unsafe { SERVER_CONFIG.server.clone() };
         let current_len = current_config.len();
         
@@ -624,7 +634,7 @@ fn server_stack(
         } else {
             prev_len.unwrap_or(current_len)
         }
-    });
+    });*/
     
     v_stack((
         dyn_stack(
@@ -715,7 +725,9 @@ fn create_server_config_signal() -> (ReadSignal<Vec<ServerEntry>>, WriteSignal<V
 pub fn app_view(rx: Receiver<ServerStatusInfo>, command_tx: tokio::sync::mpsc::UnboundedSender<ServerCommand> ) -> impl IntoView {
     let (status_signal, set_status_signal) = create_signal(ServerStatus/*Vec::<ServerStatusInfo>*/::new());
     provide_context(status_signal);
-
+    let themes_list = &THEMES.themes;
+    let ThemeNameSig(theme_name_sig) = use_context::<ThemeNameSig>().expect("ThemeNameSig not found");
+    
     // Convert rx to Arc<Mutex<>> so we can share it between contexts
     let rx = std::sync::Arc::new(std::sync::Mutex::new(rx));
     let rx_clone = rx.clone();
@@ -756,11 +768,35 @@ pub fn app_view(rx: Receiver<ServerStatusInfo>, command_tx: tokio::sync::mpsc::U
     // Start the polling
     schedule_poll(rx_clone, set_status_signal);
 
-    /*let menu_bar = container(
-        label(||"File")
-        .popout_menu(
-        ||{window_menu()})
-    );*/
+    let theme_menu = |mut m: SubMenu| {
+        // Collect and sort the theme names
+        let mut theme_names: Vec<String> = themes_list.keys().cloned().collect();
+        theme_names.sort();
+        let current = theme_name_sig.get();
+        for name in theme_names {
+            let is_current = current == name;
+            let label = if is_current {
+                format!("• {}", name)           // simple indicator
+            } else {
+                name.clone()
+            };
+            let to_set = name.clone();
+            m = m.item(label, |i| {
+                i.action(move || theme_name_sig.set(to_set.clone()))
+            });
+        }
+        m
+    };
+
+    let view_menu = |m: SubMenu| {
+        m.submenu("Theme", theme_menu)
+    };
+
+    set_window_menu(
+        Menu::new()
+            //.submenu("File", file_menu)
+            .submenu("View", view_menu)
+    );
 
     /*create_effect(move |_| {
         let status = status_signal.get();
@@ -813,6 +849,5 @@ pub fn app_view(rx: Receiver<ServerStatusInfo>, command_tx: tokio::sync::mpsc::U
             }
         }
     })
-    .window_menu(move || {window_menu()})// Doesn't actually work in floem for Windows
     .window_title(|| String::from(APPNAME))
 }

@@ -4,7 +4,7 @@ use std::fs;
 use std::io::Write;
 use quick_xml::se::Serializer;
 use serde::{Serialize, Deserialize, Deserializer};
-use crate::comms::{ServerConfig, ServerEntry, SERVER_CONFIG, };
+use crate::comms::{ServerConfig, SERVER_CONFIG, };
 use quick_xml::de::{from_str,};
 
 pub fn load_config(path: &str) -> Result<ServerConfig, Box<dyn std::error::Error>> {
