@@ -13,7 +13,7 @@ use floem::{
     menu::{Menu, SubMenu},
     peniko, prelude::*, 
     peniko::kurbo::Rect,
-    reactive::{UpdaterEffect, use_context, provide_context, create_signal, ReadSignal, SignalGet, SignalUpdate, WriteSignal}, 
+    reactive::{UpdaterEffect, use_context, provide_context, RwSignal, ReadSignal, SignalGet, SignalUpdate, WriteSignal}, 
     style::{AlignContent, CursorStyle, Position, Style}, 
     text::Weight, 
     views::{button, container, h_stack, label, scroll, v_stack, Decorators}, 

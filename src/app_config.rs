@@ -4,7 +4,7 @@ use floem::views::Decorators;
 use floem::{
     event::{Event, EventListener},
     kurbo::{Point, Size},
-    reactive::{create_updater, create_rw_signal, UpdaterEffect, RwSignal, SignalGet, SignalUpdate, SignalWith},
+    reactive::{UpdaterEffect, RwSignal, SignalGet, SignalUpdate, SignalWith},
     window::WindowConfig,
     Application, IntoView,
 };
@@ -113,7 +113,7 @@ pub fn launch_with_track<V: IntoView + 'static>(app_view: impl FnOnce() -> V + '
     provide_context(app_config);
 
     // Theme signal: initialize from config instead of a hard-coded string
-    let theme_name = create_rw_signal(app_config.with(|c| c.syntect_theme_name.clone()));
+    let theme_name = RwSignal::new(app_config.with(|c| c.syntect_theme_name.clone()));
     provide_context(ThemeNameSig(theme_name));
 
     // Whenever theme_name changes, mirror it back into app_config
@@ -134,7 +134,7 @@ pub fn launch_with_track<V: IntoView + 'static>(app_view: impl FnOnce() -> V + '
     provide_context(RwSignal::new(registry));
 
     // todo: debounce this
-    create_updater(
+    UpdaterEffect::new(
         move || app_config.get(),
         |config| {
             let _ = confy::store(APPNAME, "floem-defaults", config);
