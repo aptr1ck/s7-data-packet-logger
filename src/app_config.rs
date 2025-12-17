@@ -13,7 +13,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::constants::*;
-use crate::OS_MOD;
 
 // Theme name signal type for providing context
 #[derive(Clone, Copy)]
@@ -23,7 +22,9 @@ pub struct ThemeNameSig(pub RwSignal<String>);
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AppCommand {
     Quit,
-    NewFile,
+    Minimize,
+    Maximize,
+    //NewFile,
     //OpenFile,
     //SaveFile,
     //SaveFileAs,
@@ -46,7 +47,7 @@ impl CommandRegistry {
     pub fn register(&mut self, command: AppCommand, handler: CommandHandler) {
         self.handlers.insert(command, handler);
     }
-
+    
     pub fn execute(&self, command: AppCommand) {
         if let Some(handler) = self.handlers.get(&command) {
             handler();
@@ -75,7 +76,7 @@ fn default_syntect_theme() -> String {
 pub struct AppConfig {
     pub position: Point,
     pub size: Size,
-    pub app_theme: AppThemeState,
+    //pub app_theme: AppThemeState,
     #[serde(default = "default_syntect_theme")]
     pub syntect_theme_name: String,
     pub window_scale: f64,
@@ -91,10 +92,10 @@ impl std::default::Default for AppConfig {
                 width: 350.0,
                 height: 650.0,
             },
-            app_theme: AppThemeState {
+            /*app_theme: AppThemeState {
                 system: floem::window::Theme::Dark,
                 theme: AppTheme::FollowSystem,
-            },
+            },*/
             syntect_theme_name: default_syntect_theme(),
             window_scale: 1.,
             is_maximised: false,
@@ -129,6 +130,14 @@ pub fn launch_with_track<V: IntoView + 'static>(app_view: impl FnOnce() -> V + '
     registry.register(AppCommand::Quit, Arc::new(|| {
         floem::quit_app();
     }));
+    registry.register(AppCommand::Minimize, Arc::new(|| {
+        floem::action::minimize_window();
+    }));
+    registry.register(AppCommand::Maximize, {
+        Arc::new(move || {
+            floem::action::toggle_window_maximized();
+        })
+    });
 
     //let registry_local = registry.clone();
     provide_context(RwSignal::new(registry));
@@ -143,25 +152,51 @@ pub fn launch_with_track<V: IntoView + 'static>(app_view: impl FnOnce() -> V + '
 
     let window_config = WindowConfig::default()
         .size(app_config.with(|ac| ac.size))
-        .min_size(Size::new(650.0, 300.0))
-        .position(app_config.with(|ac| ac.position));
+        .min_size(Size::new(800.0, 300.0))
+        .position(app_config.with(|ac| ac.position))
+        /*.undecorated(true)*/
+        .show_titlebar(false)
+        .resizable(true)
+        .undecorated_shadow(true);
 
     app.window(
         move |_| {
             set_window_scale(app_config.with(|c| c.window_scale));
+
+            // If config says the window was maximised last time, restore it on launch.
+            if app_config.with(|c| c.is_maximised) {
+                // toggle to maximize the newly created window
+                floem::action::toggle_window_maximized();
+            }
+
             app_view()
                 .on_event_stop(EventListener::WindowMoved, move |event| {
                     if let Event::WindowMoved(position) = event {
+                        // only store position when not maximised
                         app_config.update(|val| {
-                            val.position = *position;
+                            if !val.is_maximised {
+                                val.position = *position;
+                            }
                         })
                     }
                 })
                 .on_event_stop(EventListener::WindowResized, move |event| {
                     if let Event::WindowResized(size) = event {
+                        // only store size when not maximised
                         app_config.update(|val| {
-                            val.size = *size;
+                            if !val.is_maximised {
+                                val.size = *size;
+                            }
                         })
+                    }
+                })
+                // update config when user/OS maximises/restores the window
+                .on_event_stop(EventListener::WindowMaximizeChanged, {
+                    let app_config = app_config.clone();
+                    move |event| {
+                        if let Event::WindowMaximizeChanged(is_maximised) = event {
+                            app_config.update(|c| c.is_maximised = *is_maximised);
+                        }
                     }
                 })
         },

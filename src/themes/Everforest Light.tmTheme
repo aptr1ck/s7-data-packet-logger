@@ -22,7 +22,7 @@
 				<key>foreground</key>
 				<string>#5C6A72</string>
 				<key>lineHighlight</key>
-				<string>#efebd470</string>
+				<string>#EFEBD470</string>
 				<key>selection</key>
 				<string>#e6e2cca0</string>
 				<key>activeGuide</key>
@@ -825,7 +825,7 @@
 			<key>name</key>
 			<string>CSS red</string>
 			<key>scope</key>
-			<string>entity.other.attribute-name.class.css</string>
+			<string>entity.other.attribute-name.class.css, red</string>
 			<key>settings</key>
 			<dict>
 				<key>foreground</key>
@@ -858,7 +858,7 @@
 			<key>name</key>
 			<string>CSS green</string>
 			<key>scope</key>
-			<string>string.quoted.single.css, string.quoted.double.css, support.constant.property-value.css, meta.property-value.css, punctuation.definition.string.begin.css, punctuation.definition.string.end.css, constant.numeric.css, support.constant.font-name.css, variable.parameter.keyframe-list.css</string>
+			<string>string.quoted.single.css, string.quoted.double.css, support.constant.property-value.css, meta.property-value.css, punctuation.definition.string.begin.css, punctuation.definition.string.end.css, constant.numeric.css, support.constant.font-name.css, variable.parameter.keyframe-list.css, green</string>
 			<key>settings</key>
 			<dict>
 				<key>foreground</key>
@@ -3304,6 +3304,19 @@
 			<dict>
 				<key>foreground</key>
 				<string>#939F919C</string>
+			</dict>
+		</dict>
+		<dict>
+			<key>name</key>
+			<string>Sidebar Hover</string>
+			<key>scope</key>
+			<string>ui.hover</string>
+			<key>settings</key>
+			<dict>
+				<key>background</key>
+				<string>#FCF6E2</string>
+				<key>foreground</key>
+				<string>#5C6A72</string>
 			</dict>
 		</dict>
 	</array>
