@@ -26,6 +26,7 @@ pub enum AppCommand {
     Maximize,
     //NewFile,
     //OpenFile,
+    //OpenFileFolder,
     //SaveFile,
     //SaveFileAs,
 }
@@ -55,19 +56,6 @@ impl CommandRegistry {
     }
 }
 
-#[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Debug)]
-pub enum AppTheme {
-    FollowSystem,
-    DarkMode,
-    LightMode,
-}
-
-#[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Debug)]
-pub struct AppThemeState {
-    pub system: floem::window::Theme,
-    pub theme: AppTheme,
-}
-
 fn default_syntect_theme() -> String {
     "Default".to_string()
 }
@@ -76,7 +64,6 @@ fn default_syntect_theme() -> String {
 pub struct AppConfig {
     pub position: Point,
     pub size: Size,
-    //pub app_theme: AppThemeState,
     #[serde(default = "default_syntect_theme")]
     pub syntect_theme_name: String,
     pub window_scale: f64,

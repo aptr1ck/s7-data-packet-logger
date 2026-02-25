@@ -29,6 +29,24 @@ The structure is:
 
 There is a TIA V15.1 sample project inside this project. It shows how to setup the comms sending, and the triggering of events.
 
+## Event Types
+
+| Type | Function          |
+|------|-------------------|
+|   1  | Special events for specific functions inside this app. |
+|   9  | PLC Alarm event. EventCode = alarm number. |
+|  12  | Keep Alive packet |
+|  50  | General Event |
+
+### Special Events
+Certain event codes are reserved for internal functions.
+
+| Code | Function |
+|------|-----------------|
+|  41  | Downtime starts   |
+|  42  | Downtime ends     |
+
+
 ## Installing the Development Environment
 
 *a.k.a. Getting Started With Rust (For Dummies)*

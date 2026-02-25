@@ -1,5 +1,6 @@
 
 // Event Data Packet Definition
+#[derive(Clone)]
 pub struct EventDataPacket {
     pub raw: Vec<u8>, // Raw bytes of the packet
     pub data_type: u32, // 4 bytes for event type = 1 PLC DINT
@@ -7,7 +8,15 @@ pub struct EventDataPacket {
     pub data: Vec<u32>,  // Variable length data
 }
 
-pub fn is_system_packet(packet: &EventDataPacket) -> bool {
+#[derive(Clone)]
+pub struct SqlDataPacket {
+    pub query: String,
+    pub plc: String,
+    pub timestamp: String,
+    pub packet: EventDataPacket,
+}
+
+pub fn is_keepalive_packet(packet: &EventDataPacket) -> bool {
     // Check if the packet is a system packet based on event_code
     // 12 = keep alive packet
     packet.data_type == 12

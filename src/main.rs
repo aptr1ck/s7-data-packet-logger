@@ -3,6 +3,7 @@
 mod app_config;
 mod comms;
 mod constants;
+mod downtime;
 mod sql;
 mod event_data;
 mod filehandling;

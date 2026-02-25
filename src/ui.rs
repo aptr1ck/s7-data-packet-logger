@@ -13,7 +13,7 @@ use floem::{
     peniko, prelude::*, 
     peniko::kurbo::Rect,
     reactive::{UpdaterEffect, use_context, provide_context, RwSignal, ReadSignal, SignalGet, SignalUpdate, WriteSignal}, 
-    style::{CursorStyle, Style}, 
+    style::{CursorStyle, Style},    
     text::Weight, 
     views::{button, container, h_stack, label, scroll, v_stack, Decorators}, 
     window::{ResizeDirection},
@@ -28,8 +28,10 @@ use syntect_assets::assets::HighlightingAssets;
 use crate::app_config::{AppCommand, /*AppConfig,*/ ThemeNameSig};
 use crate::comms::{ServerEntry, ServerStatus, ServerCommand, generate_server_id};
 use crate::constants::*;
+use crate::downtime::*;
 use crate::filehandling::file_tail;
 use crate::{SERVER_CONFIG, ServerStatusInfo, mpsc::Receiver};
+use crate::sql::{connect_to_db, query_packets};
 use crate::utils::*;
 
 const LOG_LINES: usize = 500; // Number of lines to show in the log viewer
@@ -54,6 +56,8 @@ enum ResizeEdge {
 #[derive(Clone, Copy, Eq, Hash, PartialEq)]
 enum Tab {
     Servers,
+    Downtime,
+    Alarms,
     Log,
 }
 
@@ -61,6 +65,8 @@ impl std::fmt::Display for Tab {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match *self {
             Tab::Servers => write!(f, "Connections"),
+            Tab::Downtime => write!(f, "Downtime"),
+            Tab::Alarms => write!(f, "Alarms"),
             Tab::Log => write!(f, "Log"),
         }
     }
@@ -98,24 +104,6 @@ lazy_static::lazy_static! {
     };
 }
 
-fn get_resize_edge(pos: Point, width: f64, height: f64) -> ResizeEdge {
-    let left = pos.x <= RESIZE_BORDER;
-    let right = pos.x >= width - RESIZE_BORDER;
-    let top = pos.y <= RESIZE_BORDER;
-    let bottom = pos.y >= height - RESIZE_BORDER;
-
-    match (left, right, top, bottom) {
-        (true, false, true, false) => ResizeEdge::TopLeft,
-        (false, true, true, false) => ResizeEdge::TopRight,
-        (true, false, false, true) => ResizeEdge::BottomLeft,
-        (false, true, false, true) => ResizeEdge::BottomRight,
-        (true, false, false, false) => ResizeEdge::Left,
-        (false, true, false, false) => ResizeEdge::Right,
-        (false, false, true, false) => ResizeEdge::Top,
-        (false, false, false, true) => ResizeEdge::Bottom,
-        _ => ResizeEdge::None,
-    }
-}
 
 // Core helper: find the last matching theme rule for a given *stack of scopes*
 // and return (foreground, background) if any. Uses TextMate’s “last rule wins”
@@ -243,6 +231,12 @@ unsafe fn window_control_buttons_style() -> floem::style::Style {
         //.pressed???
 }
 
+unsafe fn window_close_button_style() -> floem::style::Style {
+    let colors = get_theme_colors();
+    let style = window_control_buttons_style();
+    style.hover(|s| s.background(colors.red).color(peniko::Color::WHITE))
+}
+
 fn button_style() -> Style {
     let colors = get_theme_colors();
 
@@ -251,9 +245,9 @@ fn button_style() -> Style {
         .background(colors.bg)
         .border_color(colors.fg)
         .hover(|s| s.background(colors.bgh).border_color(colors.fg).hover(|s| s.background(colors.bgh).border_color(colors.fg)))
-        .focus(|s| s.background(colors.bg1).border_color(colors.fg).hover(|s| s.background(colors.bgh).border_color(colors.fg)))
-        .active(|s| s.background(colors.bg1).border_color(colors.fg).hover(|s| s.background(colors.bgh).border_color(colors.fg)))
-        .selected(|s| s.background(colors.bg1).border_color(colors.fg).hover(|s| s.background(colors.bgh).border_color(colors.fg)))
+        .focus(|s| s.background(colors.bg).border_color(colors.fg).hover(|s| s.background(colors.bgh).border_color(colors.fg)))
+        .active(|s| s.background(colors.bg).border_color(colors.fg).hover(|s| s.background(colors.bg1).border_color(colors.fg)))
+        .selected(|s| s.background(colors.bg).border_color(colors.fg).hover(|s| s.background(colors.bgh).border_color(colors.fg)))
 }
 
 fn input_style() -> Style {
@@ -331,12 +325,123 @@ fn tab_content(
                 let colors = get_theme_colors();
                 s.width_full().flex_grow(1.0).background(colors.bg)
             }),
+        Tab::Downtime => container(scroll(downtime_view()))
+            .style(|s| {
+                let colors = get_theme_colors();
+                s.width_full().flex_grow(1.0).background(colors.bg1)
+            }),
+        Tab::Alarms => container(scroll(alarms_view()))
+            .style(|s| {
+                let colors = get_theme_colors();
+                s.width_full().flex_grow(1.0).background(colors.bg1)
+            }),
         Tab::Log => container(scroll(log_view(status_signal)))
             .style(|s| {
                 let colors = get_theme_colors();
                 s.width_full().flex_grow(1.0).background(colors.bg1)
             }),
     }
+}
+
+fn downtime_view() -> impl IntoView {
+    let reload_trigger = RwSignal::new(0u32);
+    let query_string_signal = RwSignal::new(String::new());
+    let records_signal = RwSignal::new(Vector::<DowntimeRecord>::new());
+    let error_signal = RwSignal::new(Option::<String>::None);
+    
+    // Create an effect to re-execute the query when reload_trigger changes
+    UpdaterEffect::new(
+        move || reload_trigger.get(),
+        move |_| {
+            let (sql_query_str, sql_result) = downtime_retreive();
+            query_string_signal.set(sql_query_str);
+            
+            match sql_result {
+                Ok(packets) => {
+                    let downtime_records = process_downtime_packets(packets);
+                    let records_vec: Vector<_> = downtime_records.into_iter().collect();
+                    records_signal.set(records_vec);
+                    error_signal.set(None);
+                },
+                Err(e) => {
+                    records_signal.set(Vector::new());
+                    error_signal.set(Some(format!("Failed to query database: {}", e)));
+                }
+            }
+        },
+    );
+    
+    // Trigger initial load
+    reload_trigger.set(1);
+    
+    let records_read = records_signal.read_only();
+    let query_read = query_string_signal.read_only();
+    let error_read = error_signal.read_only();
+    
+    v_stack((
+        h_stack((
+            button("Reload")
+                .action(move || {
+                    reload_trigger.update(|v| *v = v.wrapping_add(1));
+                })
+                .style(|_| button_style()),
+            label(move || query_read.get()).style(|s| s.font_size(9.0)),
+        ))
+        .style(|s| s.gap(10.0).padding(CONTENT_PADDING).width_full().items_center()),
+        
+        match error_read.get() {
+            Some(err) => label(move || err.clone()).style(|s| s.font_size(14.0).color(get_theme_colors().fg)).into_any(),
+            None => {
+                let records_read = records_read.clone();
+                v_stack((
+                    {
+                        let records_read = records_read.clone();
+                        label(move || {
+                            let records = records_read.get();
+                            let total_seconds: i64 = records.iter()
+                                .map(|r| r.duration)
+                                .sum();
+                            let total_duration = format_seconds_to_duration(total_seconds);
+                            format!("Total Downtime: {}", total_duration)
+                        })
+                        .style(|s| {
+                            let colors = get_theme_colors();
+                            s.font_size(14.0)
+                                .color(colors.red)
+                                .padding(CONTENT_PADDING)
+                                .width_full()
+                        })
+                    },
+                    dyn_stack(
+                        move || {
+                            let records = records_read.get();
+                            (0..records.len()).collect::<Vec<usize>>()
+                        },
+                        |idx| *idx,
+                        move |idx| {
+                            let records_read = records_read.clone();
+                            label(move || {
+                                let records = records_read.get();
+                                if let Some(record) = records.get(idx) {
+                                    let formatted_duration = format_seconds_to_duration(record.duration);
+                                    format!("Start: {} | End: {} | Duration: {}", record.start, record.end, formatted_duration)
+                                } else {
+                                    String::new()
+                                }
+                            })
+                            .style(|s| s.font_size(14.0).color(get_theme_colors().fg).width_full())
+                        },
+                    ).style(|s| s.gap(5.0).padding(CONTENT_PADDING).flex_col().width_full())
+                ))
+                .style(|s| s.flex_col().width_full())
+                .into_any()
+            }
+        }
+    )).style(|s| s.width_full().flex_grow(1.0).background(get_theme_colors().bg1)).into_any()
+}
+
+fn alarms_view() -> impl IntoView {
+    label(|| "Alarms view - coming soon!").style(|s| s.font_size(20.0))
 }
 
 fn log_view(status_signal: ReadSignal<ServerStatus>) -> impl IntoView {
@@ -384,10 +489,10 @@ fn log_view(status_signal: ReadSignal<ServerStatus>) -> impl IntoView {
 }
 
 fn tab_navigation_view(
-    status_signal: ReadSignal<ServerStatus>/*Vec<ServerStatusInfo>>*/, 
+    status_signal: ReadSignal<ServerStatus>, 
     command_tx: mpsc::UnboundedSender<ServerCommand>
 ) -> impl IntoView {
-    let tabs = vec![Tab::Servers, Tab::Log]
+    let tabs = vec![Tab::Servers, Tab::Downtime, Tab::Alarms, Tab::Log]
         .into_iter()
         .collect::<Vector<Tab>>();
     let tabs = RwSignal::new(tabs);
@@ -398,6 +503,8 @@ fn tab_navigation_view(
 
     let tabs_bar = h_stack((
         tab_button(Tab::Servers, tabs.read_only(), active_tab),
+        tab_button(Tab::Downtime, tabs.read_only(), active_tab),
+        tab_button(Tab::Alarms, tabs.read_only(), active_tab),
         tab_button(Tab::Log, tabs.read_only(), active_tab),
     ))
     .style(move |s| {
@@ -805,7 +912,7 @@ fn custom_window_menu() -> impl IntoView {
         .action(move || {
             registry_max.execute(AppCommand::Maximize);
         }),
-        button("\u{E106}").style(|_| unsafe{ window_control_buttons_style() }) // Close
+        button("\u{E106}").style(|_| unsafe{ window_close_button_style() }) // Close
         .action(move || {
             registry_quit.execute(AppCommand::Quit);
         }),

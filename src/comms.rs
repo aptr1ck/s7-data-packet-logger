@@ -560,7 +560,7 @@ pub async fn run_server(
                                                     log(&format!("Parsed packet: data_type={}, plc_packet_code={}, data={:?}",
                                                                 packet.data_type, packet.plc_packet_code, packet.data));
                                                     // Check for system packet that we should not store.
-                                                    if !is_system_packet(&packet) {
+                                                    if !is_keepalive_packet(&packet) {
                                                         // Put the data into the database
                                                         let result = store_packet(&conn, &packet, &config.name); // TODO: Handle the response properly.
                                                         if result.is_err() {
