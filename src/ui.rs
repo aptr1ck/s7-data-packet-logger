@@ -33,6 +33,9 @@ use crate::filehandling::file_tail;
 use crate::{SERVER_CONFIG, ServerStatusInfo, mpsc::Receiver};
 use crate::sql::{connect_to_db, query_packets};
 use crate::utils::*;
+use std::fs;
+use std::process::Command;
+use std::env;
 
 const LOG_LINES: usize = 500; // Number of lines to show in the log viewer
 const TABBAR_HEIGHT: f64 = 37.0;
@@ -326,12 +329,11 @@ fn tab_content(
                 s.width_full().flex_grow(1.0).background(colors.bg)
             }),
         Tab::Downtime => container(
-                scroll(downtime_view())
-                    .style(|s| s.width_full().flex_grow(1.0))
+                downtime_view()
             )
             .style(|s| {
                 let colors = get_theme_colors();
-                s.width_full().flex_grow(1.0).background(colors.bg1)
+                s.size_full().background(colors.bg1)
             }),
         Tab::Alarms => container(
                 scroll(alarms_view())
@@ -461,7 +463,9 @@ fn downtime_view() -> impl IntoView {
             Some(err) => label(move || err.clone()).style(|s| s.font_size(14.0).color(get_theme_colors().fg)).into_any(),
             None => {
                 let records_read = records_read.clone();
+                // layout header, scroll list, footer directly
                 v_stack((
+                    // total downtime label fixed above scroll
                     {
                         let records_read = records_read.clone();
                         label(move || {
@@ -480,6 +484,7 @@ fn downtime_view() -> impl IntoView {
                                 .width_full()
                         })
                     },
+                    // scrollable list of entries
                     dyn_stack(
                         move || {
                             let records = records_read.get();
@@ -499,13 +504,58 @@ fn downtime_view() -> impl IntoView {
                             })
                             .style(|s| s.font_size(14.0).color(get_theme_colors().fg).width_full())
                         },
-                    ).style(|s| s.gap(5.0).padding(CONTENT_PADDING).flex_col().width_full())
+                    )
+                    .style(|s| s.gap(5.0).padding(CONTENT_PADDING).flex_col().width_full())
+                    .scroll()
+                    .style(|s| s.width_full().flex_grow(1.0).min_height(0.0).background(get_theme_colors().bg2)),
+                    // export button row rendered only when there are records. using a
+                    // dyn_stack with either zero or one element avoids having to
+                    // maintain a separate reactive closure or type hacks; the stack
+                    // simply produces no children when the vector is empty.
+                    dyn_stack(
+                        move || {
+                            if records_read.get().is_empty() {
+                                Vec::new()
+                            } else {
+                                vec![()]
+                            }
+                        },
+                        |u| *u,
+                        move |_| {
+                            let records_read = records_read.clone();
+                            h_stack((
+                                label(|| String::new()).style(|s| s.flex_grow(1.0)),
+                                button("Export").action(move || {
+                                    let records = records_read.get();
+                                    let mut csv = String::from("start,end,duration seconds\n");
+                                    for r in records.iter() {
+                                        csv.push_str(&format!("{},{},{}\n", r.start, r.end, r.duration));
+                                    }
+                                    if let Ok(mut path) = env::temp_dir().into_os_string().into_string() {
+                                        if !path.ends_with("\\") {
+                                            path.push('\\');
+                                        }
+                                        path.push_str("downtime_export.csv");
+                                        let _ = fs::write(&path, &csv).map(|_| {
+                                            let _ = Command::new("notepad").arg(&path).spawn();
+                                            crate::utils::log(&format!("Opened notepad with {}", path));
+                                        }).map_err(|e| {
+                                            crate::utils::log(&format!("Failed to export downtime: {}", e))
+                                        });
+                                    } else {
+                                        crate::utils::log("Failed to determine temp directory");
+                                    }
+                                }).style(|_| button_style()),
+                            ))
+                            .style(|s| s.width_full().padding(CONTENT_PADDING).items_center().justify_end())
+                        }
+                    )
                 ))
-                .style(|s| s.flex_col().width_full())
+                .style(|s| s.flex_col().width_full().flex_grow(1.0).min_height(0.0))
                 .into_any()
             }
         }
-    )).style(|s| s.width_full().flex_grow(1.0).background(get_theme_colors().bg1)).into_any()
+    )).style(|s| s.size_full().flex_col().background(get_theme_colors().bg1)).into_any()
 }
 
 fn alarms_view() -> impl IntoView {
