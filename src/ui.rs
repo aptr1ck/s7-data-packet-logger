@@ -465,24 +465,32 @@ fn downtime_view() -> impl IntoView {
                 let records_read = records_read.clone();
                 // layout header, scroll list, footer directly
                 v_stack((
-                    // total downtime label fixed above scroll
+                    // total downtime label fixed above scroll with times colored red
                     {
                         let records_read = records_read.clone();
-                        label(move || {
-                            let records = records_read.get();
-                            let total_seconds: i64 = records.iter()
-                                .map(|r| r.duration)
-                                .sum();
-                            let total_duration = format_seconds_to_duration(total_seconds);
-                            format!("Total Downtime: {}", total_duration)
-                        })
-                        .style(|s| {
-                            let colors = get_theme_colors();
-                            s.font_size(14.0)
-                                .color(colors.red)
-                                .padding(CONTENT_PADDING)
-                                .width_full()
-                        })
+                        h_stack((
+                            label(move || {
+                                // prefix
+                                String::from("Total Downtime: ")
+                            })
+                            .style(|s| s.font_size(14.0).color(get_theme_colors().fg)),
+                            label(move || {
+                                let records = records_read.get();
+                                let total_seconds: i64 = records.iter().map(|r| r.duration).sum();
+                                format_seconds_to_duration(total_seconds)
+                            })
+                            .style(|s| s.font_size(14.0).color(get_theme_colors().red)),
+                            label(move || String::from(" | Average Downtime Event: "))
+                            .style(|s| s.font_size(14.0).color(get_theme_colors().fg)),
+                            label(move || {
+                                let records = records_read.get();
+                                let total_seconds: i64 = records.iter().map(|r| r.duration).sum();
+                                let avg_seconds = if records.is_empty() { 0 } else { total_seconds / (records.len() as i64) };
+                                format_seconds_to_duration(avg_seconds)
+                            })
+                            .style(|s| s.font_size(14.0).color(get_theme_colors().red)),
+                        ))
+                        .style(|s| s.padding(CONTENT_PADDING).width_full())
                     },
                     // scrollable list of entries
                     dyn_stack(
