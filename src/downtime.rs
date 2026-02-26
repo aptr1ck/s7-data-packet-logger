@@ -1,7 +1,8 @@
 use crate::constants::EVENT_TYPE_SPECIAL;
 use crate::sql::{connect_to_db, query_packets};
 use crate::event_data::SqlDataPacket;
-use chrono::{Local, DateTime};
+use chrono::{Local, DateTime, Datelike};
+use winapi::um::winuser::ENDSESSION_CRITICAL;
 
 #[derive(Clone)]
 pub struct DowntimeRecord {
@@ -60,22 +61,74 @@ fn calculate_duration(start: &str, end: &str) -> i64 {
     }
 }
 
-pub fn downtime_retreive() -> (String, Result<Vec<SqlDataPacket>, rusqlite::Error>) {
-    let now = Local::now();
-    let date = now.format("%Y-%m-%d");
-    
+/// A range of time used for downtime queries.  The start date is inclusive; the
+/// SQL currently only supports a lower bound (timestamp >= start).  The
+/// conversion to a formatted date string is done here so the UI can simply
+/// request a range.
+#[derive(Clone, Copy, PartialEq)]
+pub enum DateRange {
+    Today,
+    Yesterday,
+    ThisWeek,
+    LastWeek,
+}
+
+impl DateRange {
+    /// Return a YYYY-MM-DD string suitable for passing to `query_packets`.
+    pub fn start_date(self) -> String {
+        use chrono::Duration as ChronoDuration;
+        let today = Local::now().date_naive();
+        let start = match self {
+            DateRange::Today => today,
+            DateRange::Yesterday => today - ChronoDuration::days(1),
+            DateRange::ThisWeek => {
+                let wd = today.weekday().num_days_from_monday() as i64;
+                today - ChronoDuration::days(wd)
+            }
+            DateRange::LastWeek => {
+                let wd = today.weekday().num_days_from_monday() as i64;
+                let this_week_start = today - ChronoDuration::days(wd);
+                this_week_start - ChronoDuration::days(7)
+            }
+        };
+        start.format("%Y-%m-%d").to_string()
+    }
+
+    /// Return a YYYY-MM-DD string for the end of the range, or None to query to present.
+    pub fn end_date(self) -> Option<String> {
+        use chrono::Duration as ChronoDuration;
+        let today = Local::now().date_naive();
+        let end = match self {
+            DateRange::Today => None, // Query to present
+            DateRange::Yesterday => Some(today - ChronoDuration::days(1)),
+            DateRange::ThisWeek => None, // Query to present
+            DateRange::LastWeek => {
+                let wd = today.weekday().num_days_from_monday() as i64;
+                let this_week_start = today - ChronoDuration::days(wd);
+                Some(this_week_start - ChronoDuration::days(1)) // Last day of last week
+            }
+        };
+        end.map(|d| d.format("%Y-%m-%d").to_string())
+    }
+}
+
+/// Retrieve downtime packets using the given start-date range.
+pub fn downtime_retreive(range: DateRange) -> (String, Result<Vec<SqlDataPacket>, rusqlite::Error>) {
+    let start_date = range.start_date();
+    let end_date = range.end_date().unwrap_or_else(|| String::new()); // Empty string will create a query that ignores the upper bound
+
     let conn = connect_to_db().expect("Failed to connect to database");
     // 41 = downtime start
     // 42 = downtime end
-    let sql_result = query_packets(&conn, &date.to_string(), &EVENT_TYPE_SPECIAL.to_string(), "41,42");
+    let sql_result = query_packets(&conn, &start_date, &end_date, &EVENT_TYPE_SPECIAL.to_string(), "41,42");
     let sql_query_str = if let Ok(packets) = &sql_result {
-                packets.first()
-                    .map(|p| format!("Query: {}", p.query))
-                    .unwrap_or_else(|| String::from("Query: No results found"))
-            } else {
-                String::from("Query: Failed to retrieve query")
-            };
-    
+        packets.first()
+            .map(|p| format!("Query: {}", p.query))
+            .unwrap_or_else(|| String::from("Query: No results found"))
+    } else {
+        String::from("Query: Failed to retrieve query")
+    };
+
     (sql_query_str, sql_result)
 }
 

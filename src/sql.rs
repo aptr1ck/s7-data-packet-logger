@@ -31,8 +31,8 @@ pub fn store_packet(conn: &Connection, packet: &EventDataPacket, sender: &String
     Ok(())
 }
 
-pub fn query_packets(conn: &Connection, date: &str, data_type: &str, plc_packet_code: &str) -> rusqlite::Result<Vec<SqlDataPacket>> {
-    // Parse the comma-separated plc_packet_code into integers to build a safe IN(...) clause
+pub fn query_packets(conn: &Connection, start_date: &str, end_date: &str, data_type: &str, plc_packet_code: &str) -> rusqlite::Result<Vec<SqlDataPacket>> {
+    // build a safe IN(...) clause from comma‑separated PLC codes
     let codes_vec: Vec<u32> = plc_packet_code
         .split(',')
         .map(|s| s.trim())
@@ -41,50 +41,105 @@ pub fn query_packets(conn: &Connection, date: &str, data_type: &str, plc_packet_
         .collect();
 
     let in_clause = if codes_vec.is_empty() {
-        // No valid codes -> match nothing
+        // no valid values -> make the expression always false
         String::from("IN (NULL)")
     } else {
         let codes_join = codes_vec.iter().map(|n| n.to_string()).collect::<Vec<_>>().join(",");
         format!("IN({})", codes_join)
     };
 
-    let sql = format!(
-        "SELECT plc, timestamp, data_type, plc_packet_code, data FROM event_data WHERE timestamp >= ?1 AND data_type = ?2 AND plc_packet_code {}",
-        in_clause
-    );
-    println!("Executing SQL Query: {}", sql);
+    // We treat the input dates as **dates** (YYYY-MM-DD).  The timestamp
+    // column stores a full RFC3339 string, so equality on that string will
+    // almost never match when only a date is supplied.  Converting the
+    // column to a date with `date(timestamp)` makes single‑day queries behave
+    // properly.  An empty `end_date` means "no upper bound".
 
-    // Keep readable copies for the row-mapper closure (avoid shadowing)
-    let date_str = date.to_string();
-    let data_type_param = data_type.to_string();
-    let in_clause_clone = in_clause.clone();
-
-    let mut stmt = conn.prepare(&sql)?;
-    let packet_iter = stmt.query_map(params![date, data_type], move |row| {
-        let plc: String = row.get(0)?;
-        let timestamp: String = row.get(1)?;
-        let data_type: u32 = row.get(2)?;
-        let plc_packet_code: u32 = row.get(3)?;
-        let data_json: String = row.get(4)?;
-        let query = format!(
-            "SELECT plc, timestamp, data_type, plc_packet_code, data FROM event_data WHERE timestamp >= '{}' AND data_type = {} AND plc_packet_code {}",
-            date_str, data_type_param, in_clause_clone
+    if end_date.is_empty() {
+        // open‑ended query (no upper limit)
+        let sql = format!(
+            "SELECT plc, timestamp, data_type, plc_packet_code, data \
+             FROM event_data \
+             WHERE date(timestamp, 'localtime') >= date(?1) \
+               AND data_type = ?2 \
+               AND plc_packet_code {}",
+            in_clause
         );
-        let data_vec: Vec<u32> = serde_json::from_str(&data_json).unwrap_or_default();
-        println!("Results: {}", data_vec.len());
+        println!("Executing SQL Query: {}", sql);
 
-        Ok(SqlDataPacket {
-            query,
-            plc,
-            timestamp,
-            packet: EventDataPacket {
-                raw: vec![], // Raw bytes not stored in DB
-                data_type,
-                plc_packet_code,
-                data: data_vec,
+        let mut stmt = conn.prepare(&sql)?;
+        let packet_iter = stmt.query_map(params![start_date, data_type], move |row| {
+            let plc: String = row.get(0)?;
+            let timestamp: String = row.get(1)?;
+            let data_type: u32 = row.get(2)?;
+            let plc_packet_code: u32 = row.get(3)?;
+            let data_json: String = row.get(4)?;
+            let query = format!(
+                "SELECT plc, timestamp, data_type, plc_packet_code, data FROM event_data \
+                 WHERE date(timestamp, 'localtime') >= date('{}') AND data_type = {} AND plc_packet_code {}",
+                start_date, data_type, in_clause
+            );
+            let data_vec: Vec<u32> = serde_json::from_str(&data_json).unwrap_or_default();
+            println!("Results: {}", data_vec.len());
+
+            Ok(SqlDataPacket {
+                query,
+                plc,
+                timestamp,
+                packet: EventDataPacket {
+                    raw: vec![],
+                    data_type,
+                    plc_packet_code,
+                    data: data_vec,
+                },
+            })
+        })?;
+
+        packet_iter.collect()
+    } else {
+        // bounded range query
+        let sql = format!(
+            "SELECT plc, timestamp, data_type, plc_packet_code, data \
+             FROM event_data \
+             WHERE date(timestamp, 'localtime') >= date(?1) \
+               AND date(timestamp, 'localtime') <= date(?2) \
+               AND data_type = ?3 \
+               AND plc_packet_code {}",
+            in_clause
+        );
+        println!("Executing SQL Query: {}", sql);
+
+        let mut stmt = conn.prepare(&sql)?;
+        let packet_iter = stmt.query_map(
+            params![start_date, end_date, data_type],
+            move |row| {
+                let plc: String = row.get(0)?;
+                let timestamp: String = row.get(1)?;
+                let data_type: u32 = row.get(2)?;
+                let plc_packet_code: u32 = row.get(3)?;
+                let data_json: String = row.get(4)?;
+                let query = format!(
+                    "SELECT plc, timestamp, data_type, plc_packet_code, data FROM event_data \
+                     WHERE date(timestamp, 'localtime') >= date('{}') AND date(timestamp, 'localtime') <= date('{}') \
+                           AND data_type = {} AND plc_packet_code {}",
+                    start_date, end_date, data_type, in_clause
+                );
+                let data_vec: Vec<u32> = serde_json::from_str(&data_json).unwrap_or_default();
+                println!("Results: {}", data_vec.len());
+
+                Ok(SqlDataPacket {
+                    query,
+                    plc,
+                    timestamp,
+                    packet: EventDataPacket {
+                        raw: vec![],
+                        data_type,
+                        plc_packet_code,
+                        data: data_vec,
+                    },
+                })
             },
-        })
-    })?;
+        )?;
 
-    packet_iter.collect()
+        packet_iter.collect()
+    }
 }

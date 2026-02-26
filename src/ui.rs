@@ -325,17 +325,26 @@ fn tab_content(
                 let colors = get_theme_colors();
                 s.width_full().flex_grow(1.0).background(colors.bg)
             }),
-        Tab::Downtime => container(scroll(downtime_view()))
+        Tab::Downtime => container(
+                scroll(downtime_view())
+                    .style(|s| s.width_full().flex_grow(1.0))
+            )
             .style(|s| {
                 let colors = get_theme_colors();
                 s.width_full().flex_grow(1.0).background(colors.bg1)
             }),
-        Tab::Alarms => container(scroll(alarms_view()))
+        Tab::Alarms => container(
+                scroll(alarms_view())
+                    .style(|s| s.width_full().flex_grow(1.0))
+            )
             .style(|s| {
                 let colors = get_theme_colors();
                 s.width_full().flex_grow(1.0).background(colors.bg1)
             }),
-        Tab::Log => container(scroll(log_view(status_signal)))
+        Tab::Log => container(
+                scroll(log_view(status_signal))
+                    .style(|s| s.width_full().flex_grow(1.0))
+            )
             .style(|s| {
                 let colors = get_theme_colors();
                 s.width_full().flex_grow(1.0).background(colors.bg1)
@@ -345,15 +354,16 @@ fn tab_content(
 
 fn downtime_view() -> impl IntoView {
     let reload_trigger = RwSignal::new(0u32);
+    let selected_range = RwSignal::new(DateRange::Today);
     let query_string_signal = RwSignal::new(String::new());
     let records_signal = RwSignal::new(Vector::<DowntimeRecord>::new());
     let error_signal = RwSignal::new(Option::<String>::None);
     
-    // Create an effect to re-execute the query when reload_trigger changes
+    // Create an effect to re-execute the query when reload_trigger or range changes
     UpdaterEffect::new(
-        move || reload_trigger.get(),
-        move |_| {
-            let (sql_query_str, sql_result) = downtime_retreive();
+        move || (reload_trigger.get(), selected_range.get()),
+        move |(_trigger, range)| {
+            let (sql_query_str, sql_result) = downtime_retreive(range);
             query_string_signal.set(sql_query_str);
             
             match sql_result {
@@ -379,7 +389,65 @@ fn downtime_view() -> impl IntoView {
     let error_read = error_signal.read_only();
     
     v_stack((
+        // date range selectors
         h_stack((
+            {
+                let sel = selected_range.clone();
+                button("Today").action(move || {
+                    sel.set(DateRange::Today);
+                    reload_trigger.update(|v| *v = v.wrapping_add(1));
+                }).style(move |s| {
+                    let colors = get_theme_colors();
+                    if sel.get() == DateRange::Today {
+                        s.background(colors.bgh)
+                    } else {
+                        s
+                    }
+                })
+            },
+            {
+                let sel = selected_range.clone();
+                button("Yesterday").action(move || {
+                    sel.set(DateRange::Yesterday);
+                    reload_trigger.update(|v| *v = v.wrapping_add(1));
+                }).style(move |s| {
+                    let colors = get_theme_colors();
+                    if sel.get() == DateRange::Yesterday {
+                        s.background(colors.bgh)
+                    } else {
+                        s
+                    }
+                })
+            },
+            {
+                let sel = selected_range.clone();
+                button("This Week").action(move || {
+                    sel.set(DateRange::ThisWeek);
+                    reload_trigger.update(|v| *v = v.wrapping_add(1));
+                }).style(move |s| {
+                    let colors = get_theme_colors();
+                    if sel.get() == DateRange::ThisWeek {
+                        s.background(colors.bgh)
+                    } else {
+                        s
+                    }
+                })
+            },
+            {
+                let sel = selected_range.clone();
+                button("Last Week").action(move || {
+                    sel.set(DateRange::LastWeek);
+                    reload_trigger.update(|v| *v = v.wrapping_add(1));
+                }).style(move |s| {
+                    let colors = get_theme_colors();
+                    if sel.get() == DateRange::LastWeek {
+                        s.background(colors.bgh)
+                    } else {
+                        s
+                    }
+                })
+            },
+            // reload button + query text
             button("Reload")
                 .action(move || {
                     reload_trigger.update(|v| *v = v.wrapping_add(1));
@@ -485,7 +553,10 @@ fn log_view(status_signal: ReadSignal<ServerStatus>) -> impl IntoView {
             .width_full()
             .padding(CONTENT_PADDING)
             .background(colors.bg1)
-    }).scroll()
+    })
+    // ensure scroll wrapper fills parent width
+    .scroll()
+    .style(|s| s.width_full().flex_grow(1.0))
 }
 
 fn tab_navigation_view(
