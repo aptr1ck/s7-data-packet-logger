@@ -4,16 +4,16 @@ version = "0.0.1"
 edition = "2021"
 
 [dependencies]
-thiserror = "2.0.17"
+thiserror = "2.0.18"
 confy = "2.0.0"
 log = "0.4.29"
-env_logger = "0.11.8"
-tokio = { version = "1.48.0", features = ["full"] }
-chrono = "0.4.42"
-rusqlite = { version = "0.37.0", features = ["bundled"] }
-quick-xml = { version = "0.38.4", features = ["serialize"] }
+env_logger = "0.11.9"
+tokio = { version = "1.50.0", features = ["full"] }
+chrono = "0.4.44"
+rusqlite = { version = "0.38.0", features = ["bundled"] }
+quick-xml = { version = "0.39.2", features = ["serialize"] }
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0.145"
+serde_json = "1.0.149"
 floem = { git = "https://github.com/lapce/floem.git", features = ["rfd-async-std", "serde", "vello"] }
 lazy_static = "1.5.0"
 syntect = "5.3.0"
@@ -27,6 +27,7 @@ winapi = { version = "0.3.9", features = [
 once_cell = "1.21.3"
 im = "15.1.0"
 base64 = "0.22.1"
+rust7 = { git = "https://github.com/davenardella/Rust7.git" }
 
 [features]
 vello = ["floem/vello"]

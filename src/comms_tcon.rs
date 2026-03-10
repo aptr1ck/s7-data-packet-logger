@@ -559,13 +559,38 @@ pub async fn run_server(
                                                 if let Some(packet) = parse_event_data_packet(&buffer[..size]) {
                                                     log(&format!("Parsed packet: sender={}, data_type={}, plc_packet_code={}, data={:?}",
                                                                 &config.name, packet.data_type, packet.plc_packet_code, packet.data));
-                                                    // Check for system packet that we should not store.
-                                                    if !is_keepalive_packet(&packet) {
-                                                        // Put the data into the database
-                                                        let result = store_packet(&conn, &packet, &config.name); // TODO: Handle the response properly.
-                                                        if result.is_err() {
-                                                            if DEBUG { log(&format!("Error storing packet in database: {:?}", result)); }
-                                                            // TODO: Close the connection when we have SQL INSERT errors.
+                                                    // Check for special packets we want to process rather than store
+                                                    match packet.data_type {                                                    
+                                                        1 => { // System Packets
+                                                            match packet.plc_packet_code {
+                                                                22 => {
+                                                                    log("Received config packet (code 22), updating server config.");
+                                                                    // Update with new values from the packet
+                                                                    //process_config_packet(&packet);
+                                                                }
+                                                                41 | 42 => {
+                                                                    // Downtime start/stop. Put the data into the database
+                                                                    let result = store_packet(&conn, &packet, &config.name);
+                                                                    if result.is_err() {
+                                                                        if DEBUG { log(&format!("Error storing packet in database: {:?}", result)); }
+                                                                        // TODO: Close the connection when we have SQL INSERT errors.
+                                                                    }
+                                                                }
+                                                                _ => {
+                                                                    log(&format!("Received unknown system packet (code {})", packet.plc_packet_code));
+                                                                }
+                                                            }
+                                                        }
+                                                        12 => { // Keep alive packet that we do no need to store
+                                                            ;
+                                                        }
+                                                        _ => { // Other
+                                                            // Put the data into the database
+                                                            let result = store_packet(&conn, &packet, &config.name); 
+                                                            if result.is_err() {
+                                                                if DEBUG { log(&format!("Error storing packet in database: {:?}", result)); }
+                                                                // TODO: Close the connection when we have SQL INSERT errors.
+                                                            }
                                                         }
                                                     }
                                                 } else {

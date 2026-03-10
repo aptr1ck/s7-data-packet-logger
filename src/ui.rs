@@ -26,12 +26,11 @@ use syntect::highlighting::{
 use syntect::parsing::Scope; //{ParseState, Scope, ScopeStack, ScopeStackOp, SyntaxReference, SyntaxSet, };
 use syntect_assets::assets::HighlightingAssets;
 use crate::app_config::{AppCommand, /*AppConfig,*/ ThemeNameSig};
-use crate::comms::{ServerEntry, ServerStatus, ServerCommand, generate_server_id};
+use crate::comms_tcon::{ServerEntry, ServerStatus, ServerCommand, generate_server_id};
 use crate::constants::*;
 use crate::downtime::*;
 use crate::filehandling::file_tail;
 use crate::{SERVER_CONFIG, ServerStatusInfo, mpsc::Receiver};
-use crate::sql::{connect_to_db, query_packets};
 use crate::utils::*;
 use std::fs;
 use std::process::Command;

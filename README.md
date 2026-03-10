@@ -43,9 +43,16 @@ Certain event codes are reserved for internal functions.
 
 | Code | Function |
 |------|-----------------|
+|  22  | Configuration Packet |
 |  41  | Downtime starts   |
 |  42  | Downtime ends     |
 
+#### Configuration Packet Data
+
+| | Data | Format | Description |
+|----|----|----|----|
+| 0  | DowntimeDBNum | Int | DB Number that contains the Downtime info. |
+| 1  | SecondsBeforeDowntime | Int | Number of seconds that need to elapse with no production before counting as downtime. |
 
 ## Installing the Development Environment
 

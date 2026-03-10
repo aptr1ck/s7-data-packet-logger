@@ -1,7 +1,7 @@
 #![windows_subsystem = "windows"]
 
 mod app_config;
-mod comms;
+mod comms_tcon;
 mod constants;
 mod downtime;
 mod sql;
@@ -15,7 +15,7 @@ mod xmlhandling;
 use floem::prelude::*;
 use std::sync::{Arc, mpsc};
 use tokio::sync::Notify;
-use crate::comms::*;
+use crate::comms_tcon::*;
 use crate::ui::*;
 use crate::utils::log;
 
