@@ -6,4 +6,11 @@
         <port>2000</port>
         <autostart>true</autostart>
     </Server>
+    <Server>
+        <id>MTc3MzEwNzk3NTI5MDAwMDIwMAAAAAAAAAAAAAAAAAA=</id>
+        <name>Trimmer</name>
+        <ip_address>192.168.100.253</ip_address>
+        <port>2002</port>
+        <autostart>true</autostart>
+    </Server>
 </ServerConfig>

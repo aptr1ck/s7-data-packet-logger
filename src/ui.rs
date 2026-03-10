@@ -397,12 +397,16 @@ fn downtime_view() -> impl IntoView {
     let query_string_signal = RwSignal::new(String::new());
     let records_signal = RwSignal::new(Vector::<DowntimeRecord>::new());
     let error_signal = RwSignal::new(Option::<String>::None);
+    let plc_view = RwSignal::new(<String>::new());
     
+    // temp
+    plc_view.set("Edger".to_string());
+
     // Create an effect to re-execute the query when reload_trigger or range changes
     UpdaterEffect::new(
         move || (reload_trigger.get(), selected_range.get()),
         move |(_trigger, range)| {
-            let (sql_query_str, sql_result) = downtime_retreive(range);
+            let (sql_query_str, sql_result) = downtime_retreive(range, &plc_view.get());//.unwrap_or_else(|| "*".to_string()).as_str());
             query_string_signal.set(sql_query_str);
             
             match sql_result {
@@ -496,6 +500,15 @@ fn downtime_view() -> impl IntoView {
         ))
         .style(|s| s.gap(10.0).padding(CONTENT_PADDING).width_full().items_center()),
         
+        h_stack((
+            label(|| "PLC:").style(|s| s.font_size(14.0).color(get_theme_colors().fg)),
+            {
+                text_input(plc_view)
+                    .style(|s| s.width(150.0).height(30.0).padding_horiz(10.0).font_size(14.0).background(get_theme_colors().ac).color(get_theme_colors().fg).border_color(get_theme_colors().fg).hover(|s| s.background(get_theme_colors().ac)).focus(|s| s.background(get_theme_colors().ac)))
+
+            },
+        )).style(|s| s.gap(10.0).padding_horiz(CONTENT_PADDING).width_full().items_center()),
+
         match error_read.get() {
             Some(err) => label(move || err.clone()).style(|s| s.font_size(14.0).color(get_theme_colors().fg)).into_any(),
             None => {
@@ -741,12 +754,12 @@ fn server_view(
             text_input(name).style(move |s| {
                 let colors = get_theme_colors();
                 s.font_size(20.0)
-                                                        .background(Color::TRANSPARENT)
-                                                        .color(colors.fg)
-                                                        .hover(|s| s.background(Color::TRANSPARENT))
-                                                        .padding(0.0)
-                                                        .border(0.0)
-                                                        .min_width(150.0)
+                    .background(Color::TRANSPARENT)
+                    .color(colors.fg)
+                    .hover(|s| s.background(Color::TRANSPARENT))
+                    .padding(0.0)
+                    .border(0.0)
+                    .min_width(150.0)
             }),
             label(move || {
                 let status = status_signal.get();

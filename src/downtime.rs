@@ -47,7 +47,7 @@ pub fn process_downtime_packets(packets: Vec<SqlDataPacket>) -> Vec<DowntimeReco
     downtime_records
 }
 
-/// Calculates the duration between two RFC3339 timestamps (returns seconds)
+// Calculates the duration between two RFC3339 timestamps (returns seconds)
 fn calculate_duration(start: &str, end: &str) -> i64 {
     match (
         DateTime::parse_from_rfc3339(start),
@@ -62,10 +62,10 @@ fn calculate_duration(start: &str, end: &str) -> i64 {
     }
 }
 
-/// A range of time used for downtime queries.  The start date is inclusive; the
-/// SQL currently only supports a lower bound (timestamp >= start).  The
-/// conversion to a formatted date string is done here so the UI can simply
-/// request a range.
+// A range of time used for downtime queries.  The start date is inclusive; the
+// SQL currently only supports a lower bound (timestamp >= start).  The
+// conversion to a formatted date string is done here so the UI can simply
+// request a range.
 #[derive(Clone, Copy, PartialEq)]
 pub enum DateRange {
     Today,
@@ -75,7 +75,7 @@ pub enum DateRange {
 }
 
 impl DateRange {
-    /// Return a YYYY-MM-DD string suitable for passing to `query_packets`.
+    // Return a YYYY-MM-DD string suitable for passing to `query_packets`.
     pub fn start_date(self) -> String {
         use chrono::Duration as ChronoDuration;
         let today = Local::now().date_naive();
@@ -95,7 +95,7 @@ impl DateRange {
         start.format("%Y-%m-%d").to_string()
     }
 
-    /// Return a YYYY-MM-DD string for the end of the range, or None to query to present.
+    // Return a YYYY-MM-DD string for the end of the range, or None to query to present.
     pub fn end_date(self) -> Option<String> {
         use chrono::Duration as ChronoDuration;
         let today = Local::now().date_naive();
@@ -113,15 +113,15 @@ impl DateRange {
     }
 }
 
-/// Retrieve downtime packets using the given start-date range.
-pub fn downtime_retreive(range: DateRange) -> (String, Result<Vec<SqlDataPacket>, rusqlite::Error>) {
+// Retrieve downtime packets using the given start-date range.
+pub fn downtime_retreive(range: DateRange, sender: &str) -> (String, Result<Vec<SqlDataPacket>, rusqlite::Error>) {
     let start_date = range.start_date();
     let end_date = range.end_date().unwrap_or_else(|| String::new()); // Empty string will create a query that ignores the upper bound
 
     let conn = connect_to_db().expect("Failed to connect to database");
     // 41 = downtime start
     // 42 = downtime end
-    let sql_result = query_packets(&conn, &start_date, &end_date, &EVENT_TYPE_SPECIAL.to_string(), "41,42");
+    let sql_result = query_packets(&conn, sender, &start_date, &end_date, &EVENT_TYPE_SPECIAL.to_string(), "41,42");
     let sql_query_str = if let Ok(packets) = &sql_result {
         packets.first()
             .map(|p| format!("Query: {}", p.query))
@@ -132,8 +132,6 @@ pub fn downtime_retreive(range: DateRange) -> (String, Result<Vec<SqlDataPacket>
 
     (sql_query_str, sql_result)
 }
-
-
 
 pub fn format_seconds_to_duration(mut seconds: i64) -> String {
     let hours = seconds / 3600;
