@@ -1024,6 +1024,19 @@
 				<string>#5D5D5D</string>
 			</dict>
 		</dict>
+		<dict>
+			<key>name</key>
+			<string>Title Bar</string>
+			<key>scope</key>
+			<string>titlebar</string>
+			<key>settings</key>
+			<dict>
+				<key>background</key>
+				<string>#5D5D5D</string>
+				<key>foreground</key>
+				<string>#C0C0C0</string>
+			</dict>
+		</dict>
 	</array>
 	<key>colorSpaceName</key>
 	<string>sRGB</string>

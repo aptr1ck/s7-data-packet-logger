@@ -151,6 +151,17 @@ fn get_current_theme() -> &'static Theme {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct ColorPair {
+    pub fg: peniko::Color,
+    pub bg: peniko::Color,
+}
+impl ColorPair {
+    pub fn new(fg: peniko::Color, bg: peniko::Color) -> Self {
+        Self { fg, bg }
+    }
+}
+
 struct ThemeColors {
     fg: peniko::Color,
     ac: peniko::Color,
@@ -160,6 +171,7 @@ struct ThemeColors {
     bgh: peniko::Color,
     red: peniko::Color,
     green: peniko::Color,
+    titlebar: ColorPair,
 }
 
 fn get_theme_colors() -> ThemeColors {
@@ -198,7 +210,16 @@ fn get_theme_colors() -> ThemeColors {
                         .unwrap_or(syntect::highlighting::Color { r: 128, g: 128, b: 128, a: 40 });
     let red = peniko::Color::from_rgba8(c.r, c.g, c.b, c.a);
 
-    ThemeColors { fg, ac, bg, bg1, bg2, bgh, red, green }
+    // TODO: Why is doing these together such a disaster?
+    let tfg = colors_for_scope_selector(theme, "titlebar")
+                        .and_then(|(fg, _)| fg)  
+                        .unwrap_or(syntect::highlighting::Color { r: 128, g: 128, b: 128, a: 40 });
+    let tbg = colors_for_scope_selector(theme, "titlebar")
+                        .and_then(|(_, bg)| bg)  
+                        .unwrap_or(syntect::highlighting::Color { r: 128, g: 128, b: 128, a: 40 });
+    let titlebar = ColorPair::new(peniko::Color::from_rgba8(tfg.r, tfg.g, tfg.b, tfg.a), peniko::Color::from_rgba8(tbg.r,tbg.g,tbg.b,tbg.a));
+
+    ThemeColors { fg, ac, bg, bg1, bg2, bgh, red, green, titlebar }
 }
 
 unsafe fn menu_item_style() -> floem::style::Style {
@@ -206,7 +227,7 @@ unsafe fn menu_item_style() -> floem::style::Style {
     
     floem::style::Style::new()
         .background(peniko::Color::TRANSPARENT)
-        .color(colors.fg)
+        .color(colors.titlebar.fg)
         .font_size(FONT_SIZE_MENU)
         .height(MENU_HEIGHT)
         .padding_horiz(CONTENT_PADDING)
@@ -219,7 +240,7 @@ unsafe fn window_control_buttons_style() -> floem::style::Style {
 
     floem::style::Style::new()
     .background(peniko::Color::TRANSPARENT)
-        .color(colors.fg)
+        .color(colors.titlebar.fg)
         .font_size(FONT_SIZE_WIN_CONTROLS)
         .height(MENU_HEIGHT)
         .padding_horiz(CONTENT_PADDING)
@@ -229,9 +250,8 @@ unsafe fn window_control_buttons_style() -> floem::style::Style {
         .border(0)
         .font_family("Segoe MDL2 Assets".to_string())
         .hover(|s| s.background(colors.bg1).color(colors.fg))
-        .focus(|s| s.background(peniko::Color::TRANSPARENT).color(colors.fg).hover(|s| s.background(peniko::Color::TRANSPARENT).color(colors.fg)))
-        .selected(|s| s.background(peniko::Color::TRANSPARENT).color(colors.fg).hover(|s| s.background(peniko::Color::TRANSPARENT).color(colors.fg)))
-        //.pressed???
+        .focus(|s| s.background(peniko::Color::TRANSPARENT).color(colors.titlebar.fg).hover(|s| s.background(peniko::Color::TRANSPARENT).color(colors.titlebar.fg)))
+        .selected(|s| s.background(peniko::Color::TRANSPARENT).color(colors.titlebar.fg).hover(|s| s.background(peniko::Color::TRANSPARENT).color(colors.titlebar.fg)))
 }
 
 unsafe fn window_close_button_style() -> floem::style::Style {
@@ -277,6 +297,23 @@ fn checkbox_style() -> Style {
         .selected(|s| s.background(colors.bg).border_color(colors.fg))
         .focus(|s| s.background(colors.ac).border_color(colors.fg).hover(|s| s.background(colors.ac).border_color(colors.fg)))
         .active(|s| s.background(colors.ac).border_color(colors.fg))
+}
+
+fn titlebar_style() -> Style {
+    let colors = get_theme_colors();
+
+    Style::new()
+        .color(colors.titlebar.fg)
+        .background(colors.titlebar.bg)
+        .border_color(colors.titlebar.fg)
+        .hover(|s| s.background(colors.titlebar.bg).border_color(colors.titlebar.fg))
+        .selected(|s| s.background(colors.titlebar.bg).border_color(colors.titlebar.fg))
+        .focus(|s| s.background(colors.titlebar.bg).border_color(colors.titlebar.fg).hover(|s| s.background(colors.titlebar.bg).border_color(colors.titlebar.fg)))
+        .active(|s| s.background(colors.titlebar.bg).border_color(colors.titlebar.fg))
+        .height(MENU_HEIGHT)
+        .padding_left(CONTENT_PADDING)
+        .items_center()
+        .gap(CONTENT_PADDING)
 }
 
 fn tab_button(
@@ -1046,14 +1083,7 @@ fn custom_window_menu() -> impl IntoView {
             registry_quit.execute(AppCommand::Quit);
         }),
         )).style(|s| s.gap(0.0)),
-    )).style(move |s| {
-        let colors = get_theme_colors();
-        s.background(colors.bg2)
-            .height(MENU_HEIGHT)
-            .padding_left(CONTENT_PADDING)
-            .items_center()
-            .gap(CONTENT_PADDING)}
-        );
+    )).style(|_| titlebar_style());
 
     menu
 }

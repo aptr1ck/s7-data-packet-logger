@@ -55,7 +55,8 @@ fn calculate_duration(start: &str, end: &str) -> i64 {
     ) {
         (Ok(start_dt), Ok(end_dt)) => {
             let duration = end_dt.signed_duration_since(start_dt);
-            duration.num_seconds() + 60 // There is always 1 minute of downtime before we capture it.
+            duration.num_seconds() + 120 // There is always 2 minutes of downtime before we capture it.
+            // TODO: Receive a packet from machine centres defining their minimum down time.
         }
         _ => 0,
     }

@@ -11,6 +11,7 @@ use floem::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::Notify;
 
 use crate::constants::*;
 
@@ -91,7 +92,7 @@ impl std::default::Default for AppConfig {
     }
 }
 
-pub fn launch_with_track<V: IntoView + 'static>(app_view: impl FnOnce() -> V + 'static) {
+pub fn launch_with_track<V: IntoView + 'static>(app_view: impl FnOnce() -> V + 'static, shutdown_notify: Arc<Notify>) {
     let config: AppConfig = confy::load(APPNAME, "floem-defaults").unwrap_or_default();
 
     let app = Application::new();
@@ -114,7 +115,8 @@ pub fn launch_with_track<V: IntoView + 'static>(app_view: impl FnOnce() -> V + '
 
     // Register Commands
     let mut registry: CommandRegistry = CommandRegistry::new();
-    registry.register(AppCommand::Quit, Arc::new(|| {
+    registry.register(AppCommand::Quit, Arc::new(move || {
+        shutdown_notify.notify_waiters();
         floem::quit_app();
     }));
     registry.register(AppCommand::Minimize, Arc::new(|| {

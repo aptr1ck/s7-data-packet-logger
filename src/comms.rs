@@ -557,8 +557,8 @@ pub async fn run_server(
                                                 let _ = tx.send(server_status.clone());
                                                 // Deserialize the event data packet
                                                 if let Some(packet) = parse_event_data_packet(&buffer[..size]) {
-                                                    log(&format!("Parsed packet: data_type={}, plc_packet_code={}, data={:?}",
-                                                                packet.data_type, packet.plc_packet_code, packet.data));
+                                                    log(&format!("Parsed packet: sender={}, data_type={}, plc_packet_code={}, data={:?}",
+                                                                &config.name, packet.data_type, packet.plc_packet_code, packet.data));
                                                     // Check for system packet that we should not store.
                                                     if !is_keepalive_packet(&packet) {
                                                         // Put the data into the database
